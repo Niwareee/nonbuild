@@ -1,0 +1,24 @@
+name: NonBuild
+version: '1.0'
+main: fr.niware.nonbuild.NonBuild
+api-version: '26.2'
+description: Ajout et déploiement des arènes du plugin practice
+authors: [niware]
+
+commands:
+  build:
+    description: Gestion des arènes (édition, sauvegarde)
+    usage: /build <addarena|edit|setcorner1|setcorner2|setspawn1|setspawn2|setcenter|status|save|cancel|info|list|delete>
+    permission: nonbuild.build
+  deploy:
+    description: Déploiement des arènes en production
+    usage: /deploy <nom> <nombre> | /deploy list | /deploy map | /deploy tp <instance> | /deploy remove <instance ou arène> | /deploy rebuild
+    permission: nonbuild.deploy
+
+permissions:
+  nonbuild.build:
+    description: Permet d'éditer et sauvegarder des arènes
+    default: op
+  nonbuild.deploy:
+    description: Permet de déployer des arènes en production
+    default: op

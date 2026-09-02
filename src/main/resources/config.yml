@@ -1,0 +1,33 @@
+# ═══════════════════════════════════════════════════════════════
+# NonBuild - configuration
+# ═══════════════════════════════════════════════════════════════
+
+worlds:
+  # Monde où les buildeurs construisent les arènes.
+  build: "build"
+  # Monde de production où les arènes sont déployées.
+  prod: "world.prod"
+
+placement:
+  # Demi-côté (blocs) de la zone carrée réservée autour du spawn (0,0).
+  # Aucune arène n'est déployée dans cette zone.
+  spawn-protection-radius: 512
+  # Marge libre (blocs) laissée autour de chaque arène déployée.
+  margin: 256
+  # Hauteur (Y) à laquelle toutes les arènes sont collées en production.
+  paste-y: 100
+
+pasting:
+  # Blocs collés par tick lors d'un déploiement.
+  blocks-per-tick: 20000
+  # Blocs capturés par tick lors d'une sauvegarde d'arène.
+  capture-blocks-per-tick: 50000
+
+limits:
+  # Volume maximal d'une arène en blocs (largeur x hauteur x profondeur).
+  max-volume: 4000000
+
+edit:
+  # Passe le joueur en mode creative à l'ouverture d'une session d'édition,
+  # et restaure son mode précédent à la fin (save/cancel).
+  set-creative: true

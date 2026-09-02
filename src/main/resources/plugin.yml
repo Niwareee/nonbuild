@@ -8,7 +8,7 @@ authors: [niware]
 commands:
   build:
     description: Gestion des arènes (édition, sauvegarde)
-    usage: /build <addarena|edit|setcorner1|setcorner2|setspawn1|setspawn2|setcenter|status|save|cancel|info|list|delete>
+    usage: /build <addarena|edit|setcorner1|setcorner2|setspawn1|setspawn2|setcenter|status|save|cancel|info|list|tp|delete>
     permission: nonbuild.build
   deploy:
     description: Déploiement des arènes en production

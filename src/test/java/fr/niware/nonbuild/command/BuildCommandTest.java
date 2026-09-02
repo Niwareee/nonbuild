@@ -1,16 +1,15 @@
 package fr.niware.nonbuild.command;
 
-import fr.niware.nonbuild.NonBuild;
-import fr.niware.nonbuild.Settings;
-import fr.niware.nonbuild.edit.EditSession;
-import fr.niware.nonbuild.edit.SessionManager;
-import fr.niware.nonbuild.model.Arena;
-import fr.niware.nonbuild.model.DeployedInstance;
-import fr.niware.nonbuild.model.Point;
-import fr.niware.nonbuild.storage.ArenaStorage;
-import fr.niware.nonbuild.storage.DeploymentStorage;
-import fr.niware.nonbuild.testutil.BukkitServerFixture;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Logger;
+
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -21,27 +20,30 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.List;
-import java.util.UUID;
-import java.util.logging.Logger;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import fr.niware.nonbuild.NonBuild;
+import fr.niware.nonbuild.Settings;
+import fr.niware.nonbuild.edit.EditSession;
+import fr.niware.nonbuild.edit.SessionManager;
+import fr.niware.nonbuild.model.Arena;
+import fr.niware.nonbuild.model.DeployedInstance;
+import fr.niware.nonbuild.model.Point;
+import fr.niware.nonbuild.storage.ArenaStorage;
+import fr.niware.nonbuild.storage.DeploymentStorage;
+import fr.niware.nonbuild.testutil.BukkitServerFixture;
 
 /**
  * Tests de FLUX du moteur de commandes : seuls l'état observable compte
@@ -58,6 +60,7 @@ class BuildCommandTest {
     private DeploymentStorage deployments;
     private SessionManager sessions;
     private World buildWorld;
+    private Chunk buildChunk;
     private Player player;
     private BuildCommand command;
 
@@ -79,7 +82,8 @@ class BuildCommandTest {
         when(settingsPlugin.getConfig()).thenReturn(new YamlConfiguration());
 
         plugin = mock(NonBuild.class);
-        when(plugin.getSettings()).thenReturn(new Settings(settingsPlugin));
+        Settings settings = new Settings(settingsPlugin);
+        when(plugin.getSettings()).thenReturn(settings);
         when(plugin.getArenas()).thenReturn(arenas);
         when(plugin.getDeployments()).thenReturn(deployments);
         when(plugin.getSessions()).thenReturn(sessions);
@@ -116,7 +120,9 @@ class BuildCommandTest {
     }
 
     private void stubStoneBlocks() {
-        when(buildWorld.getBlockAt(anyInt(), anyInt(), anyInt())).thenAnswer(inv -> {
+        buildChunk = mock(Chunk.class);
+        when(buildWorld.getChunkAt(anyInt(), anyInt())).thenReturn(buildChunk);
+        when(buildChunk.getBlock(anyInt(), anyInt(), anyInt())).thenAnswer(inv -> {
             Block block = mock(Block.class);
             BlockData data = mock(BlockData.class);
             when(data.getAsString()).thenReturn("minecraft:stone");
@@ -366,7 +372,9 @@ class BuildCommandTest {
 
     @Test
     void saveAvecUneErreurDeCaptureGardeLaSession() {
-        when(buildWorld.getBlockAt(anyInt(), anyInt(), anyInt()))
+        buildChunk = mock(Chunk.class);
+        when(buildWorld.getChunkAt(anyInt(), anyInt())).thenReturn(buildChunk);
+        when(buildChunk.getBlock(anyInt(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("chunk corrompu"));
         prepareCompleteSession("arene");
 
@@ -478,7 +486,9 @@ class BuildCommandTest {
     void laTabCompletionProposeSousCommandesEtArenes() throws Exception {
         arenas.save(sampleArena("getdown"));
         assertTrue(command.onTabComplete(player, cmd, "build", new String[]{""}).contains("addarena"));
+        assertTrue(command.onTabComplete(player, cmd, "build", new String[]{""}).contains("tp"));
         assertTrue(command.onTabComplete(player, cmd, "build", new String[]{"edit", ""}).contains("getdown"));
+        assertTrue(command.onTabComplete(player, cmd, "build", new String[]{"tp", ""}).contains("getdown"));
         assertTrue(command.onTabComplete(player, cmd, "build", new String[]{"delete", "getdown", ""}).isEmpty());
         assertTrue(command.onTabComplete(player, cmd, "build", new String[]{"save", ""}).isEmpty());
         assertTrue(command.onTabComplete(player, cmd, "build", new String[]{"e"}).contains("edit"));
@@ -489,5 +499,86 @@ class BuildCommandTest {
         List<String> options = command.onTabComplete(player, cmd, "build", new String[]{"setc"});
         assertTrue(options.contains("setcorner1"));
         assertFalse(options.contains("save"));
+    }
+
+    // ────────────────────────────── tp ──────────────────────────────
+
+    @Test
+    void tpTeleporteAuCentreDeLArene() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        when(Bukkit.getServer().getWorld("build")).thenReturn(buildWorld);
+        when(buildWorld.getChunkAtAsync(anyInt(), anyInt()))
+                .thenReturn(CompletableFuture.completedFuture(mock(Chunk.class)));
+
+        assertTrue(run("tp", "getdown"));
+
+        Location target = new Location(buildWorld, 1, 61, 1, 0f, 0f);
+        verify(player).teleport(target);
+        // les 9 chunks autour du centre sont préchargés
+        int cx = target.getBlockX() >> 4;
+        int cz = target.getBlockZ() >> 4;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                verify(buildWorld).getChunkAtAsync(cx + dx, cz + dz);
+            }
+        }
+    }
+
+    @Test
+    void tpAttendLaFinDuPrechargementAvantDeTeleporter() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        when(Bukkit.getServer().getWorld("build")).thenReturn(buildWorld);
+        CompletableFuture<Chunk> pending = new CompletableFuture<>();
+        when(buildWorld.getChunkAtAsync(anyInt(), anyInt())).thenReturn(pending);
+
+        run("tp", "getdown");
+        verify(player, never()).teleport(org.mockito.ArgumentMatchers.any(Location.class));
+
+        pending.complete(mock(Chunk.class));
+        verify(player).teleport(new Location(buildWorld, 1, 61, 1, 0f, 0f));
+    }
+
+    @Test
+    void tpAnnuleSiLeJoueurSeDeconnectePendantLePrechargement() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        when(Bukkit.getServer().getWorld("build")).thenReturn(buildWorld);
+        CompletableFuture<Chunk> pending = new CompletableFuture<>();
+        when(buildWorld.getChunkAtAsync(anyInt(), anyInt())).thenReturn(pending);
+        when(player.isOnline()).thenReturn(false);
+
+        run("tp", "getdown");
+        pending.complete(mock(Chunk.class));
+
+        verify(player, never()).teleport(org.mockito.ArgumentMatchers.any(Location.class));
+    }
+
+    @Test
+    void tpSansArgumentNeTeleportePas() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        assertTrue(run("tp"));
+        verify(player, never()).teleport(org.mockito.ArgumentMatchers.any(Location.class));
+    }
+
+    @Test
+    void tpDuneAreneIntrouvableNeTeleportePas() throws Exception {
+        assertTrue(run("tp", "fantome"));
+        verify(player, never()).teleport(org.mockito.ArgumentMatchers.any(Location.class));
+    }
+
+    @Test
+    void tpRefuseUnMondeDeBuildNonCharge() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        when(Bukkit.getServer().getWorld("build")).thenReturn(null);
+
+        assertTrue(run("tp", "getdown"));
+        verify(player, never()).teleport(org.mockito.ArgumentMatchers.any(Location.class));
+    }
+
+    @Test
+    void laConsoleNePeutPasSeTeleporter() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        CommandSender console = mock(CommandSender.class);
+        assertTrue(command.onCommand(console, cmd, "build", new String[]{"tp", "getdown"}));
+        verify(player, never()).teleport(org.mockito.ArgumentMatchers.any(Location.class));
     }
 }

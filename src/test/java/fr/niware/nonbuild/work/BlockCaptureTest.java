@@ -1,8 +1,11 @@
 package fr.niware.nonbuild.work;
 
-import fr.niware.nonbuild.schematic.SpongeSchematic;
-import fr.niware.nonbuild.testutil.BukkitServerFixture;
-import net.kyori.adventure.text.Component;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.bukkit.Chunk;
 import org.bukkit.DyeColor;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -12,25 +15,23 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.block.sign.Side;
 import org.bukkit.block.sign.SignSide;
 import org.bukkit.plugin.Plugin;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import fr.niware.nonbuild.schematic.SpongeSchematic;
+import fr.niware.nonbuild.testutil.BukkitServerFixture;
+import net.kyori.adventure.text.Component;
 
 class BlockCaptureTest {
 
@@ -43,10 +44,20 @@ class BlockCaptureTest {
     @Test
     void captureProduitLeSchematicAttendu() {
         World world = mock(World.class);
-        when(world.getBlockAt(anyInt(), anyInt(), anyInt())).thenAnswer(inv -> {
+        Chunk chunk = mock(Chunk.class);
+        when(world.getChunkAt(anyInt(), anyInt())).thenReturn(chunk);
+        // chunk.getBlock(localX, localY, localZ) — on reconstruit les world coords
+        // pour ce test : minX=10, minZ=30 → chunk (0, 1) → origin (0, 16)
+        when(chunk.getBlock(anyInt(), anyInt(), anyInt())).thenAnswer(inv -> {
             Block block = mock(Block.class);
             BlockData data = mock(BlockData.class);
-            when(data.getAsString()).thenReturn("s:" + inv.getArgument(0) + ":" + inv.getArgument(1) + ":" + inv.getArgument(2));
+            int localX = inv.getArgument(0);
+            int localY = inv.getArgument(1);
+            int localZ = inv.getArgument(2);
+            // chunk (0, 1) → worldX = localX, worldZ = 16 + localZ
+            int worldX = localX;
+            int worldZ = 16 + localZ;
+            when(data.getAsString()).thenReturn("s:" + worldX + ":" + localY + ":" + worldZ);
             when(block.getBlockData()).thenReturn(data);
             return block;
         });
@@ -84,6 +95,8 @@ class BlockCaptureTest {
     @Test
     void lesBlockEntitiesSontCapturesSansPasserParGetStatePourLeReste() {
         World world = mock(World.class);
+        Chunk chunk = mock(Chunk.class);
+        when(world.getChunkAt(anyInt(), anyInt())).thenReturn(chunk);
 
         Block signBlock = mock(Block.class);
         BlockData signData = mock(BlockData.class);
@@ -107,8 +120,10 @@ class BlockCaptureTest {
         when(stoneData.getMaterial()).thenReturn(Material.STONE);
         when(stoneBlock.getBlockData()).thenReturn(stoneData);
 
-        when(world.getBlockAt(10, 20, 30)).thenReturn(signBlock);
-        when(world.getBlockAt(11, 20, 30)).thenReturn(stoneBlock);
+        // minX=10, minZ=30 → chunk (0, 1) → origin (0, 16)
+        // local coords: sign at (10, 20, 14), stone at (11, 20, 14)
+        when(chunk.getBlock(10, 20, 14)).thenReturn(signBlock);
+        when(chunk.getBlock(11, 20, 14)).thenReturn(stoneBlock);
 
         AtomicReference<SpongeSchematic> result = new AtomicReference<>();
         BlockCapture capture = new BlockCapture(world, 10, 20, 30, 2, 1, 1, 10,
@@ -131,7 +146,7 @@ class BlockCaptureTest {
     @Test
     void uneErreurDeLectureEstTransmiseAuCallback() {
         World world = mock(World.class);
-        when(world.getBlockAt(anyInt(), anyInt(), anyInt()))
+        when(world.getChunkAt(anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("chunk corrompu"));
 
         AtomicReference<String> error = new AtomicReference<>();

@@ -122,35 +122,36 @@ Ces décisions viennent du propriétaire du projet ; ne pas les contourner sans 
 
 Permissions `nonbuild.build` et `nonbuild.deploy`, `default: op`. Console autorisée pour `/deploy` (sauf `tp`) ; les sous-commandes `/build` exigeant un joueur renvoient « réservée aux joueurs ».
 
-| Commande | Effet |
-|---|---|
-| `/build addarena "Nom"` | Ouvre la session (slug = nom normalisé), passe en creative si `edit.set-creative`. Le joueur doit être dans le monde `worlds.build`. |
-| `/build setcorner1`, `setcorner2`, `setspawn1`, `setspawn2`, `setcenter` | Posent le point à la **position du joueur**, remis **d'équerre** automatiquement : x/z au centre du bloc, yaw/pitch arrondis au multiple de 90° le plus proche (les points sont posés à la main, jamais parfaitement alignés). Ordre guidé : corner1 → corner2 → spawn1 → spawn2 → center → save. |
-| `/build status` / `cancel` | Checklist / abandon (restaure le mode de jeu). |
-| `/build save` | Valide (5 points, volume ≤ `limits.max-volume`, points dans le cuboïde) puis capture → `arenas/<slug>.yml` + `schematics/<slug>.schem`. Session refermée seulement si TOUT est écrit. |
-| `/build edit <arène>` / `info` / `list` / `delete <arène>` | Recharge en édition / détails / liste / suppression (YAML+schematic ; refusée si des instances sont déployées). |
-| `/deploy "<arène>" <n>` | Déploiement/mise à jour (1..128). Voir sémantique + pipeline plus bas. |
-| `/deploy list` | Instances enregistrées. |
-| `/deploy map` | Carte ASCII + stats. |
-| `/deploy tp <instance>` | Précharge **en async** les 9 chunks autour du centre (3×3) puis téléporte le joueur une fois chargés — évite la génération synchrone (freeze) et la chute dans le vide à la première arrivée. Si le joueur se déconnecte pendant le chargement, le tp est annulé ; un échec de chargement de chunk ne bloque pas le tp. |
-| `/deploy remove <instance>` ou `<arène>` | Effacement physique des blocs (air) puis retrait du registre. Un nom d'arène = toutes ses instances. Sans confirmation. |
-| `/deploy rebuild` (ou `--rebuild`) | Monde de production recréé à neuf : joueurs évacués vers le monde de build, unload + suppression du dossier, recréation **void** (seed 0, `VoidChunkGenerator`), spawn du monde en (0.5, 90, 0.5), collage de `spawn.schem` en (0, 90, 0), `deployments.yml` vidé puis toutes les instances qui y figuraient redéployées (comptes par arène conservés, numéros repartent de 1). Fonctionne aussi registre vide (monde + spawn) ou monde prod absent (mode récupération). Sans confirmation. |
+| Commande                                                                 | Effet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/build addarena "Nom"`                                                  | Ouvre la session (slug = nom normalisé), passe en creative si `edit.set-creative`. Le joueur doit être dans le monde `worlds.build`.                                                                                                                                                                                                                                                                                                                                                        |
+| `/build setcorner1`, `setcorner2`, `setspawn1`, `setspawn2`, `setcenter` | Posent le point à la **position du joueur**, remis **d'équerre** automatiquement : x/z au centre du bloc, yaw/pitch arrondis au multiple de 90° le plus proche (les points sont posés à la main, jamais parfaitement alignés). Ordre guidé : corner1 → corner2 → spawn1 → spawn2 → center → save.                                                                                                                                                                                           |
+| `/build status` / `cancel`                                               | Checklist / abandon (restaure le mode de jeu).                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `/build save`                                                            | Valide (5 points, volume ≤ `limits.max-volume`, points dans le cuboïde) puis capture → `arenas/<slug>.yml` + `schematics/<slug>.schem`. Session refermée seulement si TOUT est écrit.                                                                                                                                                                                                                                                                                                       |
+| `/build edit <arène>` / `info` / `list` / `delete <arène>`               | Recharge en édition / détails / liste / suppression (YAML+schematic ; refusée si des instances sont déployées).                                                                                                                                                                                                                                                                                                                                                                             |
+| `/build tp <arène>`                                                      | Téléporte au **centre de l'arène dans le monde de build** (miroir de `/deploy tp` côté production) : précharge les 9 chunks autour (3×3) en async puis téléporte. Réservée aux joueurs.                                                                                                                                                                                                                                                                                                     |
+| `/deploy "<arène>" <n>`                                                  | Déploiement/mise à jour (1..128). Voir sémantique + pipeline plus bas.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `/deploy list`                                                           | Instances enregistrées.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `/deploy map`                                                            | Carte ASCII + stats.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `/deploy tp <instance>`                                                  | Précharge **en async** les 9 chunks autour du centre (3×3) puis téléporte le joueur une fois chargés — évite la génération synchrone (freeze) et la chute dans le vide à la première arrivée. Si le joueur se déconnecte pendant le chargement, le tp est annulé ; un échec de chargement de chunk ne bloque pas le tp.                                                                                                                                                                     |
+| `/deploy remove <instance>` ou `<arène>`                                 | Effacement physique des blocs (air) puis retrait du registre. Un nom d'arène = toutes ses instances. Sans confirmation.                                                                                                                                                                                                                                                                                                                                                                     |
+| `/deploy rebuild` (ou `--rebuild`)                                       | Monde de production recréé à neuf : joueurs évacués vers le monde de build, unload + suppression du dossier, recréation **void** (seed 0, `VoidChunkGenerator`), spawn du monde en (0.5, 90, 0.5), collage de `spawn.schem` en (0, 90, 0), `deployments.yml` vidé puis toutes les instances qui y figuraient redéployées (comptes par arène conservés, numéros repartent de 1). Fonctionne aussi registre vide (monde + spawn) ou monde prod absent (mode récupération). Sans confirmation. |
 
 ## Config de référence (`config.yml`, `saveDefaultConfig`)
 
 ```yaml
 worlds:
-  build: "build"   # monde où les buildeurs construisent (validé à addarena)
-  prod: "world"    # monde de collage (doit être chargé au deploy)
+  build: 'build' # monde où les buildeurs construisent (validé à addarena)
+  prod: 'world' # monde de collage (doit être chargé au deploy)
 placement:
-  spawn-protection-radius: 512   # demi-côté du carré interdit autour de (0,0)
-  margin: 32                     # marge PAR CELLULE : gap réel entre 2 arènes = 2×margin
-  paste-y: 60                    # Y absolu du coin bas de chaque collage
+  spawn-protection-radius: 512 # demi-côté du carré interdit autour de (0,0)
+  margin: 32 # marge PAR CELLULE : gap réel entre 2 arènes = 2×margin
+  paste-y: 60 # Y absolu du coin bas de chaque collage
 pasting:
-  blocks-per-tick: 20000         # collage/effacement (plancher 1000)
+  blocks-per-tick: 20000 # collage/effacement (plancher 1000)
   capture-blocks-per-tick: 50000 # capture au save (plancher 1000)
 limits:
-  max-volume: 4000000            # blocs (≈ 200×100×200)
+  max-volume: 4000000 # blocs (≈ 200×100×200)
 edit:
   set-creative: true
 ```
@@ -163,15 +164,15 @@ edit:
 
 ```yaml
 slug: getdown
-display-name: "Getdown"
+display-name: 'Getdown'
 world: build
 saved-at: 1756576800000
-corner1: {x: -32, y: -61, z: -26}     # blocs, normalisés min/max
-corner2: {x: -25, y: -56, z: -17}
-center:  {x: -27.5, y: -58.0, z: -21.5, yaw: 179.9, pitch: 4.7}
-spawn1:  {x, y, z, yaw, pitch}        # position précise du joueur au moment du set
-spawn2:  {x, y, z, yaw, pitch}
-size: {x: 8, y: 6, z: 10}
+corner1: { x: -32, y: -61, z: -26 } # blocs, normalisés min/max
+corner2: { x: -25, y: -56, z: -17 }
+center: { x: -27.5, y: -58.0, z: -21.5, yaw: 179.9, pitch: 4.7 }
+spawn1: { x, y, z, yaw, pitch } # position précise du joueur au moment du set
+spawn2: { x, y, z, yaw, pitch }
+size: { x: 8, y: 6, z: 10 }
 volume: 480
 ```
 
@@ -179,16 +180,16 @@ volume: 480
 
 ```yaml
 instances:
-  <slug>-<N>:                 # N = max(existant)+1 par arène → TROUS possibles après
-    arena: <slug>             # remove ; ne jamais supposer la continuité
+  <slug>-<N>: # N = max(existant)+1 par arène → TROUS possibles après
+    arena: <slug> # remove ; ne jamais supposer la continuité
     world: prod
-    deployed-at: <epoch-ms>   # bump à chaque re-déploiement (signal de fraîcheur)
-    center: {x, y, z, yaw, pitch}    # ancre absolue (double) ; spawns/center = positions
-    spawn1: {x, y, z, yaw, pitch}    # précises avec orientation du buildeur
-    spawn2: {x, y, z, yaw, pitch}
-    corner1: {x, y, z}               # volume COLLÉ, blocs entiers inclusifs
-    corner2: {x, y, z}
-    cell: {min-x, min-z, max-x, max-z}  # emprise (arène+marge), garantit zéro chevauchement
+    deployed-at: <epoch-ms> # bump à chaque re-déploiement (signal de fraîcheur)
+    center: { x, y, z, yaw, pitch } # ancre absolue (double) ; spawns/center = positions
+    spawn1: { x, y, z, yaw, pitch } # précises avec orientation du buildeur
+    spawn2: { x, y, z, yaw, pitch }
+    corner1: { x, y, z } # volume COLLÉ, blocs entiers inclusifs
+    corner2: { x, y, z }
+    cell: { min-x, min-z, max-x, max-z } # emprise (arène+marge), garantit zéro chevauchement
 ```
 
 - Écriture par `YamlConfiguration.save()` : **non atomique**. Le consommateur (nongame) doit tolérer une lecture partielle (retry), ne jamais crasher sur une entrée invalide.

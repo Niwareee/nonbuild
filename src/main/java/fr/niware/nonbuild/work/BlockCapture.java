@@ -1,12 +1,5 @@
 package fr.niware.nonbuild.work;
 
-import fr.niware.nonbuild.schematic.BlockEntityIO;
-import fr.niware.nonbuild.schematic.SpongeSchematic;
-import org.bukkit.World;
-import org.bukkit.block.Block;
-import org.bukkit.block.data.BlockData;
-import org.bukkit.scheduler.BukkitRunnable;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -14,11 +7,21 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import org.bukkit.Chunk;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.scheduler.BukkitRunnable;
+
+import fr.niware.nonbuild.schematic.BlockEntityIO;
+import fr.niware.nonbuild.schematic.SpongeSchematic;
+
 /**
  * Capture une région du monde de build vers un schematic, répartie sur
  * plusieurs ticks (budget de blocs par tick) pour éviter de freeze le serveur.
  * Les block entities sont capturés au passage (getState() uniquement pour les
  * matériaux qui en portent, le surcoût est négligeable).
+ * Itère par Chunk (getBlock) pour réduire les lookups et améliorer le cache.
  */
 public class BlockCapture extends BukkitRunnable {
 
@@ -78,7 +81,12 @@ public class BlockCapture extends BukkitRunnable {
                 int z = rem / sizeX;
                 int x = rem - z * sizeX;
 
-                Block block = world.getBlockAt(minX + x, minY + y, minZ + z);
+                int worldX = minX + x;
+                int worldY = minY + y;
+                int worldZ = minZ + z;
+
+                Chunk chunk = world.getChunkAt(worldX >> 4, worldZ >> 4);
+                Block block = chunk.getBlock(worldX & 0x0F, worldY, worldZ & 0x0F);
                 BlockData data = block.getBlockData();
                 indices[i] = paletteIds.computeIfAbsent(data.getAsString(), s -> {
                     palette.add(s);
@@ -103,6 +111,10 @@ public class BlockCapture extends BukkitRunnable {
 
             if (cursor >= total) {
                 cancel();
+                // Capture des entités (ItemFrame, Painting) après les blocs
+                List<Map<String, Object>> entities = BlockEntityIO.captureEntities(
+                        world, minX, minY, minZ, sizeX, sizeY, sizeZ);
+                blockEntities.addAll(entities);
                 SpongeSchematic schematic = SpongeSchematic.create(sizeX, sizeY, sizeZ, indices, palette, blockEntities);
                 done.accept(schematic, System.nanoTime() - startNanos);
             }

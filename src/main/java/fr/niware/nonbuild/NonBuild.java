@@ -12,6 +12,7 @@ import fr.niware.nonbuild.edit.SessionListener;
 import fr.niware.nonbuild.edit.SessionManager;
 import fr.niware.nonbuild.storage.ArenaStorage;
 import fr.niware.nonbuild.storage.DeploymentStorage;
+import fr.niware.nonbuild.world.VoidChunkGenerator;
 
 public class NonBuild extends JavaPlugin {
 
@@ -66,7 +67,11 @@ public class NonBuild extends JavaPlugin {
 
         if (world == null) {
             getLogger().info("Le monde de production §e" + worldName + "§f n'est pas chargé, tentative de chargement...");
-            WorldCreator creator = new WorldCreator(worldName);
+            // Monde neuf en void (cohérent avec /deploy rebuild) : pas de terrain généré.
+            WorldCreator creator = new WorldCreator(worldName)
+                    .generator(new VoidChunkGenerator())
+                    .generateStructures(false)
+                    .seed(0L);
             world = creator.createWorld();
 
             if (world == null) {

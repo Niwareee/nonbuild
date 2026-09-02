@@ -1,11 +1,5 @@
 package fr.niware.nonbuild.storage;
 
-import fr.niware.nonbuild.model.DeployedInstance;
-import fr.niware.nonbuild.model.Point;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.plugin.java.JavaPlugin;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -14,10 +8,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.bukkit.Bukkit;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import fr.niware.nonbuild.model.DeployedInstance;
+import fr.niware.nonbuild.model.Point;
+
 /**
  * Stocke les instances déployées dans deployments.yml.
  * Ce fichier est le contrat lu par le plugin practice : chaque instance expose
  * son monde, son centre, ses coins, ses deux spawns et sa cellule d'emprise.
+ * La sauvegarde est faite en async pour ne jamais bloquer le main thread.
  */
 public class DeploymentStorage {
 
@@ -54,7 +57,54 @@ public class DeploymentStorage {
         }
     }
 
-    public synchronized void save() {
+    /**
+     * Sauvegarde le registre (écriture atomique).
+     * La sérialisation YAML est faite en async pour ne pas bloquer le main thread.
+     * Retourne un Runnable qui, quand exécuté, attend la fin de l'écriture.
+     * Pour un usage synchrone (deploy séquentiel), appeler le Runnable retourné.
+     * Pour un usage asynchrone (put/remove/clear), ignorer le retour.
+     */
+    public Runnable save() {
+        Map<String, DeployedInstance> snapshot = new LinkedHashMap<>(instances);
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            YamlConfiguration yaml = new YamlConfiguration();
+            for (DeployedInstance instance : snapshot.values()) {
+                String path = "instances." + instance.getName();
+                yaml.set(path + ".arena", instance.getArena());
+                yaml.set(path + ".world", instance.getWorld());
+                yaml.set(path + ".deployed-at", instance.getDeployedAt());
+                setPoint(yaml, path + ".center", instance.getCenter());
+                setBlock(yaml, path + ".corner1", instance.getCorner1());
+                setBlock(yaml, path + ".corner2", instance.getCorner2());
+                setPoint(yaml, path + ".spawn1", instance.getSpawn1());
+                setPoint(yaml, path + ".spawn2", instance.getSpawn2());
+                yaml.set(path + ".cell.min-x", instance.getCellMinXZ()[0]);
+                yaml.set(path + ".cell.min-z", instance.getCellMinXZ()[1]);
+                yaml.set(path + ".cell.max-x", instance.getCellMaxXZ()[0]);
+                yaml.set(path + ".cell.max-z", instance.getCellMaxXZ()[1]);
+            }
+            try {
+                YamlFiles.saveAtomic(yaml, file);
+            } catch (IOException e) {
+                plugin.getLogger().severe("Impossible de sauvegarder deployments.yml : " + e.getMessage());
+            }
+            latch.countDown();
+        });
+        return () -> {
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        };
+    }
+
+    /**
+     * Sauvegarde synchrone (main thread). Utilisée par le pipeline de deploy
+     * qui doit garantir que chaque instance est persistée avant la suivante.
+     */
+    public void saveSync() {
         YamlConfiguration yaml = new YamlConfiguration();
         for (DeployedInstance instance : instances.values()) {
             String path = "instances." + instance.getName();
@@ -80,14 +130,14 @@ public class DeploymentStorage {
 
     public void put(DeployedInstance instance) {
         instances.put(instance.getName(), instance);
-        save();
+        saveSync();
     }
 
     public boolean remove(String name) {
         if (instances.remove(name) == null) {
             return false;
         }
-        save();
+        saveSync();
         return true;
     }
 

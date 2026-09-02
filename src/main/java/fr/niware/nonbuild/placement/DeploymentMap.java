@@ -1,7 +1,5 @@
 package fr.niware.nonbuild.placement;
 
-import fr.niware.nonbuild.model.DeployedInstance;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -9,12 +7,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import fr.niware.nonbuild.model.DeployedInstance;
+
 /**
  * Dessine une carte ASCII vue du dessus des instances déployées :
  * la cellule d'emprise (arène + marge) apparaît en contour « · », le volume
  * réellement collé (corner1/corner2) est rempli d'une lettre propre à
  * l'arène — visible même quand l'arène est plus petite qu'une case —,
  * la zone protégée du spawn est un contour « ░ » et le spawn marqué d'un +.
+ * Si une position de joueur est fournie, son chunk est indiqué avec un @.
  * Accompagnée de statistiques (surface collée, % d'emprise).
  */
 public final class DeploymentMap {
@@ -26,7 +27,18 @@ public final class DeploymentMap {
     private DeploymentMap() {
     }
 
+    /**
+     * Rendu de la carte sans position de joueur.
+     */
     public static List<String> render(List<DeployedInstance> instances, int spawnRadius) {
+        return render(instances, spawnRadius, null);
+    }
+
+    /**
+     * Rendu de la carte avec la position du joueur (optionnelle).
+     * @param playerPos position mondiale du joueur, ou null si inconnue (console)
+     */
+    public static List<String> render(List<DeployedInstance> instances, int spawnRadius, int[] playerPos) {
         List<String> lines = new ArrayList<>();
         if (instances.isEmpty()) {
             lines.add("§7Aucune instance déployée : la carte est vide. Déployez avec /deploy <arène> <nombre>.");
@@ -67,6 +79,9 @@ public final class DeploymentMap {
 
         drawProtectedOutline(grid, minX, minZ, scale, spawnRadius);
         placeSpawn(grid, minX, minZ, scale);
+        if (playerPos != null) {
+            placePlayer(grid, minX, minZ, scale, playerPos[0], playerPos[1]);
+        }
 
         Map<String, Character> arenaChars = new LinkedHashMap<>();
         Map<String, Integer> arenaCounts = new LinkedHashMap<>();
@@ -89,7 +104,7 @@ public final class DeploymentMap {
             fillArena(grid, minX, minZ, scale, instance, arenaChars.get(instance.getArena()));
         }
 
-        lines.add("§6▸ Carte des déploiements §8(§71 case = " + scale + " blocs · X → Est, Z ↓ Sud§8)");
+        lines.add("<gold><bold>▸ Carte des déploiements <dark_gray>(<gray>1 case = " + scale + " blocs · X → Est, Z ↓ Sud<dark_gray>)");
         for (char[] row : grid) {
             lines.add(new String(row));
         }
@@ -105,15 +120,16 @@ public final class DeploymentMap {
         long emprise = spanX0 * spanZ0;
         int percent = (int) (cellsArea * 100 / emprise);
 
-        lines.add("§6▸ §e" + instances.size() + " instance(s) §8· §e" + arenaChars.size() + " arène(s) §8· §7"
-                + fmt(pasted) + " blocs² collés §8· §7cellules = §e" + percent + "% §7de l'emprise (§f"
-                + fmt(emprise) + " blocs²§7)");
-        lines.add("§6▸ Légende §8(+ spawn · ░ zone protégée · · limite de cellule · lettre = arène collée) :");
+        lines.add("<gold><bold>▸ <yellow>" + instances.size() + " instance(s) <dark_gray>· <yellow>" + arenaChars.size() + " arène(s) <dark_gray>· <gray>"
+                + fmt(pasted) + " blocs² collés <dark_gray>· <gray>cellules = <yellow>" + percent + "% <gray>de l'emprise (<white>"
+                + fmt(emprise) + " blocs²<gray>)");
+        lines.add("<gold><bold>▸ Légende <dark_gray>(+ spawn · ░ zone protégée · · limite de cellule · lettre = arène collée"
+                + (playerPos != null ? " · @ vous" : "") + ") :");
         for (Map.Entry<String, Character> entry : arenaChars.entrySet()) {
             int[] cell = cellDims.get(entry.getKey());
             int[] arena = arenaDims.get(entry.getKey());
-            lines.add("  §e" + entry.getValue() + " §7= §f" + entry.getKey()
-                    + " §8(" + arenaCounts.get(entry.getKey()) + " inst., arène " + arena[0] + "×" + arena[1]
+            lines.add("  <yellow>" + entry.getValue() + " <gray>= <white>" + entry.getKey()
+                    + " <dark_gray>(" + arenaCounts.get(entry.getKey()) + " inst., arène " + arena[0] + "×" + arena[1]
                     + ", cellule " + cell[0] + "×" + cell[1] + ")");
         }
         return lines;
@@ -168,6 +184,14 @@ public final class DeploymentMap {
         int z = toGrid(0, minZ, scale);
         if (x >= 0 && x < grid[0].length && z >= 0 && z < grid.length) {
             grid[z][x] = '+';
+        }
+    }
+
+    private static void placePlayer(char[][] grid, long minX, long minZ, long scale, int playerX, int playerZ) {
+        int x = toGrid(playerX >> 4, minX, scale);
+        int z = toGrid(playerZ >> 4, minX, scale);
+        if (x >= 0 && x < grid[0].length && z >= 0 && z < grid.length) {
+            grid[z][x] = '@';
         }
     }
 

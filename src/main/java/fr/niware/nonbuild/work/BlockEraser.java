@@ -1,17 +1,19 @@
 package fr.niware.nonbuild.work;
 
+import java.util.function.Consumer;
+
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.scheduler.BukkitRunnable;
 
-import java.util.function.Consumer;
-
 /**
  * Efface une région du monde (remplissage d'air), répartie sur plusieurs
  * ticks avec un budget de blocs par tick. Sert à la suppression physique des
  * instances et au nettoyage des anciens emplacements lors d'un redéploiement.
+ * Itère par Chunk (getBlock) pour réduire les lookups et améliorer le cache.
  */
 public class BlockEraser extends BukkitRunnable {
 
@@ -61,7 +63,12 @@ public class BlockEraser extends BukkitRunnable {
                 int z = rem / sizeX;
                 int x = rem - z * sizeX;
 
-                world.getBlockAt(minX + x, minY + y, minZ + z).setBlockData(air, false);
+                int worldX = minX + x;
+                int worldY = minY + y;
+                int worldZ = minZ + z;
+
+                Chunk chunk = world.getChunkAt(worldX >> 4, worldZ >> 4);
+                chunk.getBlock(worldX & 0x0F, worldY, worldZ & 0x0F).setBlockData(air, false);
 
                 cursor++;
                 processed++;

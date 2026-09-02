@@ -13,14 +13,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Chunk;
-import org.bukkit.Difficulty;
-import org.bukkit.Location;
-import org.bukkit.World;
-import org.bukkit.WorldCreator;
+import org.bukkit.*;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -38,6 +32,7 @@ import fr.niware.nonbuild.schematic.SpongeSchematic;
 import fr.niware.nonbuild.storage.ArenaStorage;
 import fr.niware.nonbuild.work.BlockEraser;
 import fr.niware.nonbuild.work.BlockPaster;
+import fr.niware.nonbuild.work.ChunkPreloader;
 import fr.niware.nonbuild.world.VoidChunkGenerator;
 
 public class DeployCommand implements TabExecutor {
@@ -106,13 +101,13 @@ public class DeployCommand implements TabExecutor {
 
         File schematicFile = plugin.getArenas().schematicFile(slug);
         if (!schematicFile.exists()) {
-            Msg.error(sender, "Schematic manquante pour §e" + slug + "§c. Refaites /build edit " + slug + " puis /build save.");
+            Msg.error(sender, "Schematic manquante pour <yellow>" + slug + "<red>. Refaites /build edit " + slug + " puis /build save.");
             return true;
         }
 
         World prodWorld = Bukkit.getWorld(plugin.getSettings().prodWorld());
         if (prodWorld == null) {
-            Msg.error(sender, "Le monde de production §e" + plugin.getSettings().prodWorld() + "§c n'est pas chargé (voir config.yml).");
+            Msg.error(sender, "Le monde de production <yellow>" + plugin.getSettings().prodWorld() + "<red> n'est pas chargé (voir config.yml).");
             return true;
         }
 
@@ -121,7 +116,7 @@ public class DeployCommand implements TabExecutor {
             return true;
         }
 
-        Msg.info(sender, "Chargement de la schematic de §e" + slug + "§7...");
+        Msg.info(sender, "Chargement de la schematic de <yellow>" + slug + "<gray>...");
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             final SpongeSchematic schematic;
             try {
@@ -220,21 +215,21 @@ public class DeployCommand implements TabExecutor {
         int created = plans.size() - updated;
         int untouched = existing.size() - updated;
         if (created == 0) {
-            Msg.ok(sender, "Mise à jour de §f" + updated + "§a instance(s) de §f" + arena.getDisplayName() + "§a sur leurs emplacements.");
+            Msg.ok(sender, "Mise à jour de <white>" + updated + "<green> instance(s) de <white>" + arena.getDisplayName() + "<green> sur leurs emplacements.");
         } else if (updated == 0) {
-            Msg.ok(sender, created + " emplacement(s) réservé(s) pour §f" + arena.getDisplayName() + "§a :");
+            Msg.ok(sender, created + " emplacement(s) réservé(s) pour <white>" + arena.getDisplayName() + "<green> :");
         } else {
-            Msg.ok(sender, "Mise à jour de §f" + updated + "§a instance(s) et création de §f" + created
-                    + "§a pour §f" + arena.getDisplayName() + "§a.");
+            Msg.ok(sender, "Mise à jour de <white>" + updated + "<green> instance(s) et création de <white>" + created
+                    + "<green> pour <white>" + arena.getDisplayName() + "<green>.");
         }
         if (untouched > 0) {
             Msg.info(sender, untouched + " instance(s) existante(s) restent inchangée(s).");
         }
         for (Plan plan : plans) {
-            Msg.raw(sender, "  §7• §e" + plan.instanceName() + " §8→ §fcentre "
+            Msg.raw(sender, "  <gray>• <yellow>" + plan.instanceName() + " <dark_gray>→ <white>centre "
                     + plan.center().x() + ", " + plan.center().y() + ", " + plan.center().z());
         }
-        Msg.info(sender, "Collage de §e" + (long) width * height * length * plans.size() + "§7 blocs, "
+        Msg.info(sender, "Collage de <yellow>" + (long) width * height * length * plans.size() + "<gray> blocs, "
                 + plugin.getSettings().blocksPerTick() + " blocs/tick...");
 
         executePlan(sender, arena, schematic, prodWorld, plans, 0, startedAt, skipAir, onAllDone);
@@ -275,18 +270,20 @@ public class DeployCommand implements TabExecutor {
         Runnable paste = () -> pasteInstance(sender, arena, schematic, prodWorld, plans, index, startedAt, skipAir, onAllDone);
 
         if (plan.clearBefore()) {
-            Msg.info(sender, "L'emplacement de §e" + plan.instanceName() + "§7 a changé, effacement de l'ancienne zone...");
+            Msg.info(sender, "L'emplacement de <yellow>" + plan.instanceName() + "<gray> a changé, effacement de l'ancienne zone...");
             BlockEraser eraser = new BlockEraser(prodWorld,
                     plan.existing().getCorner1(), plan.existing().getCorner2(),
                     plugin.getSettings().blocksPerTick(),
-                    percent -> Msg.info(sender, "Effacement de l'ancienne zone de §e" + plan.instanceName() + " §7: " + percent + "%"),
+                    percent -> Msg.info(sender, "Effacement de l'ancienne zone de <yellow>" + plan.instanceName() + " <gray>: " + percent + "%"),
                     paste,
                     message -> {
                         deploying = false;
                         Msg.error(sender, "Erreur pendant l'effacement de l'ancienne zone de " + plan.instanceName() + " : " + message);
                         plugin.getLogger().severe("Erreur d'effacement " + plan.instanceName() + " : " + message);
                     });
-            eraser.runTaskTimer(plugin, 1L, 1L);
+            scheduleAfterPreload(prodWorld,
+                    plan.existing().getCorner1()[0], plan.existing().getCorner2()[0],
+                    plan.existing().getCorner1()[2], plan.existing().getCorner2()[2], eraser);
         } else {
             paste.run();
         }
@@ -302,7 +299,7 @@ public class DeployCommand implements TabExecutor {
                 schematic,
                 plugin.getSettings().blocksPerTick(),
                 skipAir,
-                percent -> Msg.info(sender, "Collage de §e" + plan.instanceName() + " §7: " + percent + "%"),
+                percent -> Msg.info(sender, "Collage de <yellow>" + plan.instanceName() + " <gray>: " + percent + "%"),
                 () -> {
                     pastingInstances.remove(plan.instanceName());
                     DeployedInstance instance = new DeployedInstance(
@@ -313,17 +310,17 @@ public class DeployCommand implements TabExecutor {
                             System.currentTimeMillis());
                     plugin.getDeployments().put(instance);
                     if (plan.existing() != null) {
-                        Msg.ok(sender, "Instance §f" + plan.instanceName() + " §amise à jour sur place.");
+                        Msg.ok(sender, "Instance <white>" + plan.instanceName() + " <green>mise à jour sur place.");
                     } else {
-                        Msg.ok(sender, "Instance §f" + plan.instanceName() + " §adéployée et enregistrée dans deployments.yml.");
+                        Msg.ok(sender, "Instance <white>" + plan.instanceName() + " <green>déployée et enregistrée dans deployments.yml.");
                     }
 
                     if (index + 1 < plans.size()) {
                         executePlan(sender, arena, schematic, prodWorld, plans, index + 1, startedAt, skipAir, onAllDone);
                     } else {
                         double seconds = (System.currentTimeMillis() - startedAt) / 1000.0;
-                        Msg.ok(sender, "Déploiement terminé : " + plans.size() + " instance(s) de §f"
-                                + arena.getDisplayName() + "§a en " + String.format(Locale.ROOT, "%.1f", seconds) + " s.");
+                        Msg.ok(sender, "Déploiement terminé : " + plans.size() + " instance(s) de <white>"
+                                + arena.getDisplayName() + "<green> en " + String.format(Locale.ROOT, "%.1f", seconds) + " s.");
                         if (onAllDone != null) {
                             onAllDone.run();
                         } else {
@@ -337,7 +334,20 @@ public class DeployCommand implements TabExecutor {
                     Msg.error(sender, "Erreur pendant le collage de " + plan.instanceName() + " : " + message);
                     plugin.getLogger().severe("Erreur de collage " + plan.instanceName() + " : " + message);
                 });
-        paster.runTaskTimer(plugin, 1L, 1L);
+        scheduleAfterPreload(prodWorld, plan.targetMin()[0],
+                plan.targetMin()[0] + schematic.getWidth() - 1,
+                plan.targetMin()[2], plan.targetMin()[2] + schematic.getLength() - 1, paster);
+    }
+
+    /**
+     * Planifie la tâche de blocs une fois les chunks de la région préchargés :
+     * sans cela le premier getBlockAt d'un chunk froid déclenche une génération
+     * synchrone sur le fil principal (freeze).
+     */
+    private void scheduleAfterPreload(World world, int minX, int maxX, int minZ, int maxZ,
+                                      org.bukkit.scheduler.BukkitRunnable task) {
+        ChunkPreloader.preload(plugin, world, minX, maxX, minZ, maxZ,
+                () -> task.runTaskTimer(plugin, 1L, 1L));
     }
 
     /**
@@ -366,18 +376,18 @@ public class DeployCommand implements TabExecutor {
         for (RebuildEntry entry : entries) {
             String slug = entry.slug();
             if (plugin.getArenas().get(slug) == null) {
-                Msg.error(sender, "Rebuild refusé : l'arène §e" + slug + "§c (dans deployments.yml) n'existe plus côté build.");
+                Msg.error(sender, "Rebuild refusé : l'arène <yellow>" + slug + "<red> (dans deployments.yml) n'existe plus côté build.");
                 return true;
             }
             if (!plugin.getArenas().schematicFile(slug).exists()) {
-                Msg.error(sender, "Rebuild refusé : schematic manquante pour §e" + slug + "§c. Refaites /build edit " + slug + " puis /build save.");
+                Msg.error(sender, "Rebuild refusé : schematic manquante pour <yellow>" + slug + "<red>. Refaites /build edit " + slug + " puis /build save.");
                 return true;
             }
         }
 
         File spawnFile = new File(plugin.getDataFolder(), SPAWN_SCHEMATIC);
         if (!spawnFile.exists()) {
-            Msg.error(sender, "Rebuild refusé : §e" + SPAWN_SCHEMATIC + "§c absent du dossier du plugin (plugins/NonBuild/).");
+            Msg.error(sender, "Rebuild refusé : <yellow>" + SPAWN_SCHEMATIC + "<red> absent du dossier du plugin (plugins/NonBuild/).");
             return true;
         }
 
@@ -389,7 +399,7 @@ public class DeployCommand implements TabExecutor {
 
         deploying = true;
         long startedAt = System.currentTimeMillis();
-        Msg.info(sender, "Rebuild du monde §e" + prodName + "§7 : chargement des schematics...");
+        Msg.info(sender, "Rebuild du monde <yellow>" + prodName + "<gray> : chargement des schematics...");
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             final Map<String, SpongeSchematic> arenaSchematics = new LinkedHashMap<>();
             SpongeSchematic loadedSpawn = null;
@@ -434,7 +444,7 @@ public class DeployCommand implements TabExecutor {
             evictPlayersFromProd(sender, prod);
         }
 
-        Msg.info(sender, "Suppression et recréation du monde §e" + prodName + "§7...");
+        Msg.info(sender, "Suppression et recréation du monde <yellow>" + prodName + "<gray>...");
         deleteAndRecreateWorld(sender, spawn, entries, arenaSchematics, prodName, prod, startedAt);
     }
 
@@ -522,7 +532,7 @@ public class DeployCommand implements TabExecutor {
                 percent -> Msg.info(sender, "Collage du spawn : " + percent + "%"),
                 () -> {
                     plugin.getDeployments().clear();
-                    Msg.ok(sender, "Monde §f" + prodName + "§a recréé (void) et spawn collé.");
+                    Msg.ok(sender, "Monde <white>" + prodName + "<green> recréé (void) et spawn collé.");
                     if (entries.isEmpty()) {
                         finishRebuild(sender, 0, startedAt);
                     } else {
@@ -534,7 +544,9 @@ public class DeployCommand implements TabExecutor {
                     Msg.error(sender, "Erreur pendant le collage du spawn : " + message);
                     plugin.getLogger().severe("Rebuild : erreur de collage du spawn : " + message);
                 });
-        paster.runTaskTimer(plugin, 1L, 1L);
+        scheduleAfterPreload(newWorld,
+                offset[0], offset[0] + spawn.getWidth() - 1,
+                offset[2], offset[2] + spawn.getLength() - 1, paster);
     }
 
     private record RebuildEntry(String slug, int count) {
@@ -624,7 +636,7 @@ public class DeployCommand implements TabExecutor {
         for (Player player : players) {
             player.teleport(target);
         }
-        Msg.info(sender, players.size() + " joueur(s) évacué(s) vers le monde §e" + destination.getName() + "§7.");
+        Msg.info(sender, players.size() + " joueur(s) évacué(s) vers le monde <yellow>" + destination.getName() + "<gray>.");
     }
 
     private static void deleteRecursively(Path root) throws IOException {
@@ -639,14 +651,14 @@ public class DeployCommand implements TabExecutor {
 
     private boolean handleList(CommandSender sender) {
         var instances = plugin.getDeployments().all();
-        Msg.raw(sender, "§6§lInstances déployées : §e" + instances.size());
+        Msg.raw(sender, "<gold><bold>Instances déployées : <yellow>" + instances.size());
         if (instances.isEmpty()) {
             Msg.info(sender, "Aucune instance. Déployez avec /deploy <arène> <nombre>.");
             return true;
         }
         for (DeployedInstance instance : instances) {
-            Msg.raw(sender, "  §7• §e" + instance.getName() + " §8(" + instance.getArena() + ") §7monde §f"
-                    + instance.getWorld() + " §8→ §f"
+            Msg.raw(sender, "  <gray>• <yellow>" + instance.getName() + " <dark_gray>(" + instance.getArena() + ") <gray>monde <white>"
+                    + instance.getWorld() + " <dark_gray>→ <white>"
                     + block(instance.getCenter().x()) + ", " + block(instance.getCenter().y()) + ", " + block(instance.getCenter().z()));
         }
         return true;
@@ -654,7 +666,12 @@ public class DeployCommand implements TabExecutor {
 
     private boolean handleMap(CommandSender sender) {
         List<DeployedInstance> instances = new ArrayList<>(plugin.getDeployments().all());
-        for (String line : DeploymentMap.render(instances, plugin.getSettings().spawnProtectionRadius())) {
+        int[] playerPos = null;
+        if (sender instanceof org.bukkit.entity.Player p) {
+            org.bukkit.Location loc = p.getLocation();
+            playerPos = new int[]{(int) loc.getX(), (int) loc.getZ()};
+        }
+        for (String line : DeploymentMap.render(instances, plugin.getSettings().spawnProtectionRadius(), playerPos)) {
             Msg.raw(sender, line);
         }
         return true;
@@ -675,53 +692,26 @@ public class DeployCommand implements TabExecutor {
         }
         DeployedInstance instance = plugin.getDeployments().get(args[1]);
         if (instance == null) {
-            Msg.error(sender, "Instance introuvable : " + args[1] + " (§7voir /deploy list§c)");
+            Msg.error(sender, "Instance introuvable : " + args[1] + " (<gray>voir /deploy list<red>)");
             return true;
         }
         if (pastingInstances.contains(instance.getName())) {
-            Msg.error(sender, "L'instance §e" + instance.getName() + "§c est en cours de collage, patientez.");
+            Msg.error(sender, "L'instance <yellow>" + instance.getName() + "<red> est en cours de collage, patientez.");
             return true;
         }
         org.bukkit.World world = Bukkit.getWorld(instance.getWorld());
         if (world == null) {
-            // Attempt to load the world - this should normally not be needed as the world is loaded at plugin startup
-            WorldCreator creator = new WorldCreator(instance.getWorld());
-            world = creator.createWorld();
-            if (world == null) {
-                Msg.error(sender, "Le monde §e" + instance.getWorld() + "§c n'est pas chargé et ne peut pas être créé. Vérifiez que le monde existe et que le nom est correct dans config.yml.");
-                return true;
-            }
-            // Log that we had to load the world on demand
-            plugin.getLogger().info("Monde de production §e" + instance.getWorld() + "§f chargé à la demande pour la téléportation (normalement chargé au démarrage du plugin).");
+            Msg.error(sender, "Le monde <yellow>" + instance.getWorld() + "<red> n'est pas chargé. Vérifiez le nom dans config.yml (worlds.prod).");
+            return true;
         }
         Location target = instance.getCenter().toLocation(world);
-        Msg.info(sender, "Préchargement des chunks autour de §e" + instance.getName() + "§7...");
-        preloadChunksAndTeleport(player, world, target, instance.getName());
+        Msg.info(sender, "Préchargement des chunks autour de <yellow>" + instance.getName() + "<gray>...");
+        ChunkPreloader.preloadAndTeleport(plugin, player, target,
+                () -> {
+            player.setGameMode(GameMode.CREATIVE);
+            Msg.ok(player, "Téléporté au centre de <yellow>" + instance.getName() + "<green>.");
+        });
         return true;
-    }
-
-    /**
-     * Charge les chunks autour de la destination AVANT de téléporter : sans cela la
-     * première arrivée déclenche une génération synchrone (freeze du main thread)
-     * et le joueur peut traverser le sol le temps que le chunk existe.
-     */
-    private void preloadChunksAndTeleport(Player player, World world, Location target, String instanceName) {
-        int centerX = target.getBlockX() >> 4;
-        int centerZ = target.getBlockZ() >> 4;
-        List<CompletableFuture<Chunk>> loads = new ArrayList<>();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                loads.add(world.getChunkAtAsync(centerX + dx, centerZ + dz));
-            }
-        }
-        CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]))
-                .whenComplete((ignored, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    if (!player.isOnline()) {
-                        return;
-                    }
-                    player.teleport(target);
-                    Msg.ok(player, "Téléporté au centre de §e" + instanceName + "§a.");
-                }));
     }
 
     private boolean handleRemove(CommandSender sender, String[] args) {
@@ -753,8 +743,8 @@ public class DeployCommand implements TabExecutor {
 
     private void eraseInstances(CommandSender sender, List<DeployedInstance> instances) {
         if (instances.size() > 1) {
-            Msg.info(sender, "Suppression physique de §e" + instances.size() + "§7 instance(s) de §e"
-                    + instances.get(0).getArena() + "§7...");
+            Msg.info(sender, "Suppression physique de <yellow>" + instances.size() + "<gray> instance(s) de <yellow>"
+                    + instances.get(0).getArena() + "<gray>...");
         }
         eraseNext(sender, instances, 0);
     }
@@ -765,7 +755,7 @@ public class DeployCommand implements TabExecutor {
 
         World world = Bukkit.getWorld(instance.getWorld());
         if (world == null) {
-            Msg.error(sender, "Le monde §e" + instance.getWorld() + "§c n'est pas chargé, impossible d'effacer "
+            Msg.error(sender, "Le monde <yellow>" + instance.getWorld() + "<red> n'est pas chargé, impossible d'effacer "
                     + name + ". Les instances restantes sont conservées.");
             return;
         }
@@ -773,36 +763,38 @@ public class DeployCommand implements TabExecutor {
         long volume = (long) (instance.getCorner2()[0] - instance.getCorner1()[0] + 1)
                 * (instance.getCorner2()[1] - instance.getCorner1()[1] + 1)
                 * (instance.getCorner2()[2] - instance.getCorner1()[2] + 1);
-        Msg.info(sender, "Suppression physique de §e" + name + " §7(" + volume + " blocs)...");
+        Msg.info(sender, "Suppression physique de <yellow>" + name + " <gray>(" + volume + " blocs)...");
 
         BlockEraser eraser = new BlockEraser(world,
                 instance.getCorner1(), instance.getCorner2(),
                 plugin.getSettings().blocksPerTick(),
-                percent -> Msg.info(sender, "Suppression de §e" + name + " §7: " + percent + "%"),
+                percent -> Msg.info(sender, "Suppression de <yellow>" + name + " <gray>: " + percent + "%"),
                 () -> {
                     plugin.getDeployments().remove(name);
-                    Msg.ok(sender, "Instance §e" + name + "§a effacée du monde et retirée du registre.");
+                    Msg.ok(sender, "Instance <yellow>" + name + "<green> effacée du monde et retirée du registre.");
                     if (index + 1 < instances.size()) {
                         eraseNext(sender, instances, index + 1);
                     } else if (instances.size() > 1) {
-                        Msg.ok(sender, "Terminé : §f" + instances.size() + "§a instance(s) supprimée(s).");
+                        Msg.ok(sender, "Terminé : <white>" + instances.size() + "<green> instance(s) supprimée(s).");
                     }
                 },
                 message -> {
                     Msg.error(sender, "Erreur pendant la suppression de " + name + " : " + message);
                     plugin.getLogger().severe("Erreur de suppression " + name + " : " + message);
                 });
-        eraser.runTaskTimer(plugin, 1L, 1L);
+        scheduleAfterPreload(world,
+                instance.getCorner1()[0], instance.getCorner2()[0],
+                instance.getCorner1()[2], instance.getCorner2()[2], eraser);
     }
 
     private void sendHelp(CommandSender sender) {
-        Msg.raw(sender, "§6§lDéploiement des arènes");
-        Msg.raw(sender, "§e/deploy \"nom de l'arène\" <nombre> §7— déploie <nombre> instances : les existantes sont mises à jour sur place");
-        Msg.raw(sender, "§e/deploy list §7— lister les instances déployées");
-        Msg.raw(sender, "§e/deploy map §7— carte des déploiements avec statistiques");
-        Msg.raw(sender, "§e/deploy tp <instance> §7— téléporter au centre de l'instance");
-        Msg.raw(sender, "§e/deploy remove <instance ou arène> §7— efface la zone du monde et retire du registre (un nom d'arène supprime toutes ses instances)");
-        Msg.raw(sender, "§e/deploy rebuild §7— recrée le monde de production à neuf (void + spawn.schem + toutes les instances)");
+        Msg.raw(sender, "<gold><bold>Déploiement des arènes");
+        Msg.raw(sender, "<yellow>/deploy \"nom de l'arène\" <nombre> <gray>— déploie <nombre> instances : les existantes sont mises à jour sur place");
+        Msg.raw(sender, "<yellow>/deploy list <gray>— lister les instances déployées");
+        Msg.raw(sender, "<yellow>/deploy map <gray>— carte des déploiements avec statistiques");
+        Msg.raw(sender, "<yellow>/deploy tp <instance> <gray>— téléporter au centre de l'instance");
+        Msg.raw(sender, "<yellow>/deploy remove <instance ou arène> <gray>— efface la zone du monde et retire du registre (un nom d'arène supprime toutes ses instances)");
+        Msg.raw(sender, "<yellow>/deploy rebuild <gray>— recrée le monde de production à neuf (void + spawn.schem + toutes les instances)");
     }
 
     @Override

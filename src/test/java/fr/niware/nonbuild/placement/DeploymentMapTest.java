@@ -1,13 +1,13 @@
 package fr.niware.nonbuild.placement;
 
-import fr.niware.nonbuild.model.DeployedInstance;
-import fr.niware.nonbuild.model.Point;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import fr.niware.nonbuild.model.DeployedInstance;
+import fr.niware.nonbuild.model.Point;
 
 class DeploymentMapTest {
 
@@ -85,5 +85,30 @@ class DeploymentMapTest {
         int gridWidth = lines.get(1).length();
         assertTrue(gridWidth <= 57, "grille trop large : " + gridWidth);
         assertTrue(lines.size() < 45, "trop de lignes : " + lines.size());
+    }
+
+    @Test
+    void lindicateurDeJoueurApparaitSurLaCarte() {
+        List<DeployedInstance> instances = List.of(
+                instance("getdown-1", "getdown", 544, -528, 688, -401));
+
+        // Joueur dans le chunk (64, 0) → bien dans la zone visible
+        int[] playerPos = new int[]{64, 0};
+        List<String> lines = DeploymentMap.render(instances, 512, playerPos);
+        String all = String.join("\n", lines);
+
+        assertTrue(all.contains("@"), "l'indicateur du joueur doit apparaître");
+        assertTrue(all.contains("▸ Légende"), "la légende doit mentionner @");
+    }
+
+    @Test
+    void sansPositionDeJoueurPasDIndicateur() {
+        List<DeployedInstance> instances = List.of(
+                instance("getdown-1", "getdown", 544, -528, 688, -401));
+
+        List<String> lines = DeploymentMap.render(instances, 512, null);
+        String all = String.join("\n", lines);
+
+        assertTrue(all.chars().filter(c -> c == '@').count() == 0, "pas de @ sans joueur");
     }
 }

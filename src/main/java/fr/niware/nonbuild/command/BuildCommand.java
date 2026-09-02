@@ -1,5 +1,19 @@
 package fr.niware.nonbuild.command;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+
+import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
+import org.bukkit.Location;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabExecutor;
+import org.bukkit.entity.Player;
+
 import fr.niware.nonbuild.Msg;
 import fr.niware.nonbuild.NonBuild;
 import fr.niware.nonbuild.edit.EditSession;
@@ -9,19 +23,7 @@ import fr.niware.nonbuild.model.Point;
 import fr.niware.nonbuild.schematic.SpongeSchematic;
 import fr.niware.nonbuild.storage.ArenaStorage;
 import fr.niware.nonbuild.work.BlockCapture;
-import org.bukkit.Bukkit;
-import org.bukkit.GameMode;
-import org.bukkit.Location;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabExecutor;
-import org.bukkit.entity.Player;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
+import fr.niware.nonbuild.work.ChunkPreloader;
 
 public class BuildCommand implements TabExecutor {
 
@@ -54,6 +56,7 @@ public class BuildCommand implements TabExecutor {
             case "cancel" -> requirePlayer(sender, this::handleCancel);
             case "info" -> handleInfo(sender, rest);
             case "list" -> handleList(sender);
+            case "tp" -> requirePlayer(sender, p -> handleTp(p, rest));
             case "delete" -> requirePlayer(sender, p -> handleDelete(p, rest));
             case "help" -> {
                 sendHelp(sender);
@@ -86,7 +89,7 @@ public class BuildCommand implements TabExecutor {
         }
         String buildWorld = plugin.getSettings().buildWorld();
         if (!player.getWorld().getName().equals(buildWorld)) {
-            Msg.error(player, "Vous devez être dans le monde de build §e" + buildWorld + "§c pour créer une arène.");
+            Msg.error(player, "Vous devez être dans le monde de build <yellow>" + buildWorld + "<red> pour créer une arène.");
             return true;
         }
 
@@ -101,7 +104,7 @@ public class BuildCommand implements TabExecutor {
             return true;
         }
         if (plugin.getArenas().exists(slug)) {
-            Msg.error(player, "L'arène §e" + slug + "§c existe déjà. Utilisez /build edit " + slug + " pour la modifier.");
+            Msg.error(player, "L'arène <yellow>" + slug + "<red> existe déjà. Utilisez /build edit " + slug + " pour la modifier.");
             return true;
         }
 
@@ -113,7 +116,7 @@ public class BuildCommand implements TabExecutor {
         }
         plugin.getSessions().put(player.getUniqueId(), session);
 
-        Msg.ok(player, "Session d'édition ouverte pour l'arène §f" + displayName + " §7(id §e" + slug + "§7).");
+        Msg.ok(player, "Session d'édition ouverte pour l'arène <white>" + displayName + " <gray>(id <yellow>" + slug + "<gray>).");
         sendChecklist(player, session);
         return true;
     }
@@ -136,7 +139,7 @@ public class BuildCommand implements TabExecutor {
 
         org.bukkit.World world = Bukkit.getWorld(arena.getWorld());
         if (world == null) {
-            Msg.error(player, "Le monde de build §e" + arena.getWorld() + "§c n'est pas chargé.");
+            Msg.error(player, "Le monde de build <yellow>" + arena.getWorld() + "<red> n'est pas chargé.");
             return true;
         }
 
@@ -153,7 +156,7 @@ public class BuildCommand implements TabExecutor {
         }
         plugin.getSessions().put(player.getUniqueId(), session);
 
-        Msg.ok(player, "Arène §f" + arena.getDisplayName() + " §7chargée en édition, points pré-remplis.");
+        Msg.ok(player, "Arène <white>" + arena.getDisplayName() + " <gray>chargée en édition, points pré-remplis.");
         Msg.info(player, "Repositionnez les points si besoin, puis /build save.");
         return true;
     }
@@ -169,7 +172,7 @@ public class BuildCommand implements TabExecutor {
             return true;
         }
         if (!player.getWorld().getName().equals(session.getWorld())) {
-            Msg.error(player, "Vous devez être dans le monde §e" + session.getWorld() + "§c pour définir les points.");
+            Msg.error(player, "Vous devez être dans le monde <yellow>" + session.getWorld() + "<red> pour définir les points.");
             return true;
         }
 
@@ -198,9 +201,9 @@ public class BuildCommand implements TabExecutor {
             }
         }
 
-        Msg.ok(player, "Point défini : §f" + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
-                + " §7(yaw §f" + (int) location.getYaw() + "°§7)");
-        Msg.info(player, "Étape suivante : §e" + next);
+        Msg.ok(player, "Point défini : <white>" + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
+                + " <gray>(yaw <white>" + (int) location.getYaw() + "°<gray>)");
+        Msg.info(player, "Étape suivante : <yellow>" + next);
         return true;
     }
 
@@ -228,22 +231,22 @@ public class BuildCommand implements TabExecutor {
     }
 
     private void sendChecklist(Player player, EditSession session) {
-        Msg.raw(player, "§6§lArène §e" + session.getDisplayName() + " §7— points à définir :");
+        Msg.raw(player, "<gold><bold>Arène <yellow>" + session.getDisplayName() + " <gray>— points à définir :");
         Msg.raw(player, pointLine(session.getCorner1(), "Corner 1 (englobe l'arène)", "/build setcorner1"));
         Msg.raw(player, pointLine(session.getCorner2(), "Corner 2 (opposé)", "/build setcorner2"));
         Msg.raw(player, pointLine(session.getSpawn1(), "Spawn 1", "/build setspawn1"));
         Msg.raw(player, pointLine(session.getSpawn2(), "Spawn 2 (duel)", "/build setspawn2"));
         Msg.raw(player, pointLine(session.getCenter(), "Centre de l'arène", "/build setcenter"));
         if (session.isComplete()) {
-            Msg.raw(player, "§aTous les points sont définis. Validez avec §e/build save§a.");
+            Msg.raw(player, "<green>Tous les points sont définis. Validez avec <yellow>/build save<green>.");
         }
     }
 
     private String pointLine(Location location, String label, String command) {
         if (location == null) {
-            return "  §c✖ " + label + " §8→ §e" + command;
+            return "  <red>✖ " + label + " <dark_gray>→ <yellow>" + command;
         }
-        return "  §a✔ " + label + " §7: " + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ();
+        return "  <green>✔ " + label + " <gray>: " + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ();
     }
 
     private boolean handleSave(Player player) {
@@ -255,7 +258,7 @@ public class BuildCommand implements TabExecutor {
         if (!session.isComplete()) {
             Msg.error(player, "Points manquants :");
             for (String missing : session.missingPoints()) {
-                Msg.raw(player, "  §c✖ §e" + missing);
+                Msg.raw(player, "  <red>✖ <yellow>" + missing);
             }
             return true;
         }
@@ -296,12 +299,12 @@ public class BuildCommand implements TabExecutor {
             }
         }
 
-        Msg.info(player, "Capture de §e" + volume + "§7 blocs (" + sizeX + "x" + sizeY + "x" + sizeZ + ")...");
+        Msg.info(player, "Capture de <yellow>" + volume + "<gray> blocs (" + sizeX + "x" + sizeY + "x" + sizeZ + ")...");
 
         org.bukkit.World world = player.getWorld();
         BlockCapture capture = new BlockCapture(world, minX, minY, minZ, sizeX, sizeY, sizeZ,
                 plugin.getSettings().captureBlocksPerTick(),
-                percent -> Msg.info(player, "Capture : §e" + percent + "%"),
+                percent -> Msg.info(player, "Capture : <yellow>" + percent + "%"),
                 (schematic, nanos) -> finishSave(player, session, arena, schematic, nanos),
                 message -> {
                     Msg.error(player, "Erreur pendant la capture : " + message);
@@ -331,10 +334,10 @@ public class BuildCommand implements TabExecutor {
                     return;
                 }
                 closeSession(player, session);
-                Msg.ok(player, "Arène §f" + session.getDisplayName() + " §asauvegardée en §e" + (nanos / 1_000_000) + " ms§a.");
-                Msg.raw(player, "  §7YAML : §farenas/" + session.getSlug() + ".yml");
-                Msg.raw(player, "  §7Schematic : §fschematics/" + session.getSlug() + ".schem");
-                Msg.info(player, "Déployez-la avec §e/deploy " + session.getSlug() + " <nombre>§7.");
+                Msg.ok(player, "Arène <white>" + session.getDisplayName() + " <green>sauvegardée en <yellow>" + (nanos / 1_000_000) + " ms<green>.");
+                Msg.raw(player, "  <gray>YAML : <white>arenas/" + session.getSlug() + ".yml");
+                Msg.raw(player, "  <gray>Schematic : <white>schematics/" + session.getSlug() + ".schem");
+                Msg.info(player, "Déployez-la avec <yellow>/deploy " + session.getSlug() + " <nombre><gray>.");
             });
         });
     }
@@ -346,7 +349,7 @@ public class BuildCommand implements TabExecutor {
             return true;
         }
         closeSession(player, session);
-        Msg.warn(player, "Édition de l'arène §e" + session.getDisplayName() + "§7 annulée.");
+        Msg.warn(player, "Édition de l'arène <yellow>" + session.getDisplayName() + "<gray> annulée.");
         return true;
     }
 
@@ -371,18 +374,18 @@ public class BuildCommand implements TabExecutor {
         File schematicFile = plugin.getArenas().schematicFile(slug);
         List<DeployedInstance> instances = plugin.getDeployments().byArena(slug);
 
-        Msg.raw(sender, "§6§lArène : §e" + arena.getDisplayName() + " §8(" + slug + ")");
-        Msg.raw(sender, "  §7Monde de build : §f" + arena.getWorld());
-        Msg.raw(sender, "  §7Taille : §f" + arena.sizeX() + " x " + arena.sizeY() + " x " + arena.sizeZ()
-                + " §8(" + arena.volume() + " blocs)");
-        Msg.raw(sender, "  §7Corner 1 : §f" + format(arena.getCorner1()));
-        Msg.raw(sender, "  §7Corner 2 : §f" + format(arena.getCorner2()));
-        Msg.raw(sender, "  §7Centre : §f" + format(arena.getCenter()));
-        Msg.raw(sender, "  §7Spawn 1 : §f" + format(arena.getSpawn1()));
-        Msg.raw(sender, "  §7Spawn 2 : §f" + format(arena.getSpawn2()));
-        Msg.raw(sender, "  §7Schematic : " + (schematicFile.exists() ? "§a✔ présente" : "§c✖ manquante"));
-        Msg.raw(sender, "  §7Instances déployées : §f" + instances.size());
-        Msg.raw(sender, "  §7Sauvegardée le : §f" + new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm")
+        Msg.raw(sender, "<gold><bold>Arène : <yellow>" + arena.getDisplayName() + " <dark_gray>(" + slug + ")");
+        Msg.raw(sender, "  <gray>Monde de build : <white>" + arena.getWorld());
+        Msg.raw(sender, "  <gray>Taille : <white>" + arena.sizeX() + " x " + arena.sizeY() + " x " + arena.sizeZ()
+                + " <dark_gray>(" + arena.volume() + " blocs)");
+        Msg.raw(sender, "  <gray>Corner 1 : <white>" + format(arena.getCorner1()));
+        Msg.raw(sender, "  <gray>Corner 2 : <white>" + format(arena.getCorner2()));
+        Msg.raw(sender, "  <gray>Centre : <white>" + format(arena.getCenter()));
+        Msg.raw(sender, "  <gray>Spawn 1 : <white>" + format(arena.getSpawn1()));
+        Msg.raw(sender, "  <gray>Spawn 2 : <white>" + format(arena.getSpawn2()));
+        Msg.raw(sender, "  <gray>Schematic : " + (schematicFile.exists() ? "<green>✔ présente" : "<red>✖ manquante"));
+        Msg.raw(sender, "  <gray>Instances déployées : <white>" + instances.size());
+        Msg.raw(sender, "  <gray>Sauvegardée le : <white>" + new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm")
                 .format(new java.util.Date(arena.getSavedAt())));
         return true;
     }
@@ -397,17 +400,40 @@ public class BuildCommand implements TabExecutor {
 
     private boolean handleList(CommandSender sender) {
         var arenas = plugin.getArenas().all();
-        Msg.raw(sender, "§6§lArènes enregistrées : §e" + arenas.size());
+        Msg.raw(sender, "<gold><bold>Arènes enregistrées : <yellow>" + arenas.size());
         if (arenas.isEmpty()) {
             Msg.info(sender, "Aucune arène. Créez-en une avec /build addarena \"nom\".");
             return true;
         }
         for (Arena arena : arenas) {
             int deployed = plugin.getDeployments().byArena(arena.getSlug()).size();
-            Msg.raw(sender, "  §7• §e" + arena.getSlug() + " §8(" + arena.getDisplayName() + ")§7 : "
+            Msg.raw(sender, "  <gray>• <yellow>" + arena.getSlug() + " <dark_gray>(" + arena.getDisplayName() + ")<gray> : "
                     + arena.sizeX() + "x" + arena.sizeY() + "x" + arena.sizeZ()
-                    + " §8| §7déployée x§f" + deployed);
+                    + " <dark_gray>| <gray>déployée x<white>" + deployed);
         }
+        return true;
+    }
+
+    private boolean handleTp(Player player, List<String> rest) {
+        if (rest.isEmpty()) {
+            Msg.error(player, "Usage : /build tp <arène>");
+            return true;
+        }
+        String slug = ArenaStorage.slugify(String.join(" ", rest));
+        Arena arena = plugin.getArenas().get(slug);
+        if (arena == null) {
+            Msg.error(player, "Arène introuvable : " + slug + " <dark_gray>(voir /build list<red>)");
+            return true;
+        }
+        org.bukkit.World world = Bukkit.getWorld(arena.getWorld());
+        if (world == null) {
+            Msg.error(player, "Le monde de build <yellow>" + arena.getWorld() + "<red> n'est pas chargé.");
+            return true;
+        }
+        Location target = arena.getCenter().toLocation(world);
+        Msg.info(player, "Préchargement des chunks autour de <yellow>" + arena.getDisplayName() + "<gray>...");
+        ChunkPreloader.preloadAndTeleport(plugin, player, target,
+                () -> Msg.ok(player, "Téléporté au centre de <yellow>" + arena.getDisplayName() + "<green>."));
         return true;
     }
 
@@ -427,29 +453,30 @@ public class BuildCommand implements TabExecutor {
             return true;
         }
         plugin.getArenas().delete(slug);
-        Msg.ok(player, "Arène §e" + slug + "§a supprimée (YAML + schematic).");
+        Msg.ok(player, "Arène <yellow>" + slug + "<green> supprimée (YAML + schematic).");
         return true;
     }
 
     private void sendHelp(CommandSender sender) {
-        Msg.raw(sender, "§6§lÉdition des arènes");
-        Msg.raw(sender, "§e/build addarena \"nom\" §7— ouvrir une session d'édition");
-        Msg.raw(sender, "§e/build setcorner1|setcorner2 §7— coins englobant l'arène");
-        Msg.raw(sender, "§e/build setspawn1|setspawn2 §7— spawns de duel");
-        Msg.raw(sender, "§e/build setcenter §7— centre de l'arène");
-        Msg.raw(sender, "§e/build save §7— capturer + sauvegarder (YAML + schematic)");
-        Msg.raw(sender, "§e/build status|cancel §7— état de la session / annuler");
-        Msg.raw(sender, "§e/build edit <arène> §7— recharger une arène en édition");
-        Msg.raw(sender, "§e/build info <arène> §7| §e/build list §7| §e/build delete <arène>");
+        Msg.raw(sender, "<gold><bold>Édition des arènes");
+        Msg.raw(sender, "<yellow>/build addarena \"nom\" <gray>— ouvrir une session d'édition");
+        Msg.raw(sender, "<yellow>/build setcorner1|setcorner2 <gray>— coins englobant l'arène");
+        Msg.raw(sender, "<yellow>/build setspawn1|setspawn2 <gray>— spawns de duel");
+        Msg.raw(sender, "<yellow>/build setcenter <gray>— centre de l'arène");
+        Msg.raw(sender, "<yellow>/build save <gray>— capturer + sauvegarder (YAML + schematic)");
+        Msg.raw(sender, "<yellow>/build status|cancel <gray>— état de la session / annuler");
+        Msg.raw(sender, "<yellow>/build edit <arène> <gray>— recharger une arène en édition");
+        Msg.raw(sender, "<yellow>/build tp <arène> <gray>— téléporter au centre de l'arène (monde de build)");
+        Msg.raw(sender, "<yellow>/build info <arène> <gray>| <yellow>/build list <gray>| <yellow>/build delete <arène>");
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 1) {
             return filter(List.of("addarena", "edit", "setcorner1", "setcorner2", "setspawn1",
-                    "setspawn2", "setcenter", "status", "save", "cancel", "info", "list", "delete", "help"), args[0]);
+                    "setspawn2", "setcenter", "status", "save", "cancel", "info", "list", "tp", "delete", "help"), args[0]);
         }
-        if (args.length == 2 && List.of("edit", "info", "delete").contains(args[0].toLowerCase(Locale.ROOT))) {
+        if (args.length == 2 && List.of("edit", "info", "tp", "delete").contains(args[0].toLowerCase(Locale.ROOT))) {
             return filter(plugin.getArenas().all().stream().map(Arena::getSlug).toList(), args[1]);
         }
         return List.of();

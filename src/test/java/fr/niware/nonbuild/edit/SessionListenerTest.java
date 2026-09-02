@@ -1,20 +1,20 @@
 package fr.niware.nonbuild.edit;
 
-import fr.niware.nonbuild.NonBuild;
-import fr.niware.nonbuild.Settings;
+import java.util.UUID;
+
 import org.bukkit.GameMode;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.UUID;
-
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import fr.niware.nonbuild.NonBuild;
+import fr.niware.nonbuild.Settings;
 
 class SessionListenerTest {
 
@@ -30,8 +30,9 @@ class SessionListenerTest {
         sessions = new SessionManager();
         JavaPlugin settingsPlugin = mock(JavaPlugin.class);
         when(settingsPlugin.getConfig()).thenReturn(new YamlConfiguration());
+        Settings settings = new Settings(settingsPlugin);
         when(plugin.getSessions()).thenReturn(sessions);
-        when(plugin.getSettings()).thenReturn(new Settings(settingsPlugin));
+        when(plugin.getSettings()).thenReturn(settings);
         listener = new SessionListener(plugin);
 
         playerId = UUID.randomUUID();

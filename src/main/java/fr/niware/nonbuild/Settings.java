@@ -4,45 +4,62 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 public class Settings {
 
-    private final JavaPlugin plugin;
+    private final String buildWorld;
+    private final String prodWorld;
+    private final int spawnProtectionRadius;
+    private final int margin;
+    private final int pasteY;
+    private final int blocksPerTick;
+    private final int captureBlocksPerTick;
+    private final int maxVolume;
+    private final boolean setCreativeOnEdit;
 
     public Settings(JavaPlugin plugin) {
-        this.plugin = plugin;
+        org.bukkit.configuration.Configuration cfg = plugin.getConfig();
+        this.buildWorld = cfg.getString("worlds.build", "build");
+        this.prodWorld = cfg.getString("worlds.prod", "world");
+        this.spawnProtectionRadius = cfg.getInt("placement.spawn-protection-radius", 512);
+        this.margin = cfg.getInt("placement.margin", 32);
+        this.pasteY = cfg.getInt("placement.paste-y", 60);
+        this.blocksPerTick = Math.max(1000, cfg.getInt("pasting.blocks-per-tick", 20000));
+        this.captureBlocksPerTick = Math.max(1000, cfg.getInt("pasting.capture-blocks-per-tick", 50000));
+        this.maxVolume = cfg.getInt("limits.max-volume", 4_000_000);
+        this.setCreativeOnEdit = cfg.getBoolean("edit.set-creative", true);
     }
 
     public String buildWorld() {
-        return plugin.getConfig().getString("worlds.build", "build");
+        return buildWorld;
     }
 
     public String prodWorld() {
-        return plugin.getConfig().getString("worlds.prod", "world");
+        return prodWorld;
     }
 
     public int spawnProtectionRadius() {
-        return plugin.getConfig().getInt("placement.spawn-protection-radius", 512);
+        return spawnProtectionRadius;
     }
 
     public int margin() {
-        return plugin.getConfig().getInt("placement.margin", 32);
+        return margin;
     }
 
     public int pasteY() {
-        return plugin.getConfig().getInt("placement.paste-y", 60);
+        return pasteY;
     }
 
     public int blocksPerTick() {
-        return Math.max(1000, plugin.getConfig().getInt("pasting.blocks-per-tick", 20000));
+        return blocksPerTick;
     }
 
     public int captureBlocksPerTick() {
-        return Math.max(1000, plugin.getConfig().getInt("pasting.capture-blocks-per-tick", 50000));
+        return captureBlocksPerTick;
     }
 
     public int maxVolume() {
-        return plugin.getConfig().getInt("limits.max-volume", 4_000_000);
+        return maxVolume;
     }
 
     public boolean setCreativeOnEdit() {
-        return plugin.getConfig().getBoolean("edit.set-creative", true);
+        return setCreativeOnEdit;
     }
 }

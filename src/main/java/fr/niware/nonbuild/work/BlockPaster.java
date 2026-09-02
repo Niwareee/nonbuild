@@ -1,16 +1,18 @@
 package fr.niware.nonbuild.work;
 
-import fr.niware.nonbuild.schematic.BlockEntityIO;
-import fr.niware.nonbuild.schematic.SpongeSchematic;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
+
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.scheduler.BukkitRunnable;
 
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
+import fr.niware.nonbuild.schematic.BlockEntityIO;
+import fr.niware.nonbuild.schematic.SpongeSchematic;
 
 /**
  * Colle un schematic dans un monde, réparti sur plusieurs ticks
@@ -21,6 +23,7 @@ import java.util.function.Consumer;
  * zones sûres où le vide est déjà présent (monde tout juste recréé).
  * Une fois les blocs posés, les block entities du schematic sont
  * appliqués à leur tour (par lots, budget par tick) avant le callback done.
+ * Itère par Chunk (getBlock) pour réduire les lookups et améliorer le cache.
  */
 public class BlockPaster extends BukkitRunnable {
 
@@ -106,7 +109,13 @@ public class BlockPaster extends BukkitRunnable {
             if (skipAir && isAir(paletteIndex)) {
                 continue;
             }
-            world.getBlockAt(minX + x, minY + y, minZ + z).setBlockData(dataFor(paletteIndex), false);
+
+            int worldX = minX + x;
+            int worldY = minY + y;
+            int worldZ = minZ + z;
+
+            Chunk chunk = world.getChunkAt(worldX >> 4, worldZ >> 4);
+            chunk.getBlock(worldX & 0x0F, worldY, worldZ & 0x0F).setBlockData(dataFor(paletteIndex), false);
             writes++;
         }
 
@@ -123,7 +132,13 @@ public class BlockPaster extends BukkitRunnable {
         }
         int applied = 0;
         while (entityCursor < entities.size() && applied < MAX_ENTITIES_PER_TICK) {
-            BlockEntityIO.apply(world, minX, minY, minZ, entities.get(entityCursor));
+            Map<String, Object> entry = entities.get(entityCursor);
+            String id = entry.get("Id") instanceof String s ? s : null;
+            if ("minecraft:item_frame".equals(id) || "minecraft:painting".equals(id)) {
+                BlockEntityIO.applyEntity(world, minX, minY, minZ, entry);
+            } else {
+                BlockEntityIO.apply(world, minX, minY, minZ, entry);
+            }
             entityCursor++;
             applied++;
         }

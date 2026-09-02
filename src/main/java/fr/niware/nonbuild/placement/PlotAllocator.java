@@ -51,9 +51,13 @@ public class PlotAllocator {
     public int[] allocate(int sizeX, int sizeZ) {
         int cellWidth = sizeX + 2 * margin;
         int cellLength = sizeZ + 2 * margin;
+        // Pas de la spirale en chunks : au moins l'emprise de la cellule, pour ne pas
+        // re-tester des emplacements déjà couverts par la cellule précédente (gain
+        // décisif avec les grandes marges, ex. 256 → cellules de ~45 chunks).
+        int step = Math.max(1, (Math.max(cellWidth, cellLength) + CHUNK - 1) / CHUNK);
 
-        for (int ring = 0; ring < MAX_RING; ring++) {
-            int[] found = searchRing(ring, cellWidth, cellLength);
+        for (int ring = 0; ring < MAX_RING; ring += step) {
+            int[] found = searchRing(ring, cellWidth, cellLength, step);
             if (found != null) {
                 return found;
             }
@@ -61,11 +65,11 @@ public class PlotAllocator {
         return null;
     }
 
-    private int[] searchRing(int ring, int cellWidth, int cellLength) {
+    private int[] searchRing(int ring, int cellWidth, int cellLength, int step) {
         if (ring == 0) {
             return checkCell(0, 0, cellWidth, cellLength);
         }
-        for (int i = -ring; i < ring; i++) {
+        for (int i = -ring; i < ring; i += step) {
             int[] result = checkCell(i * CHUNK, -ring * CHUNK, cellWidth, cellLength);
             if (result != null) return result;
 

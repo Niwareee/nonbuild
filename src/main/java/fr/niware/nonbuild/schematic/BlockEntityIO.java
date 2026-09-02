@@ -12,12 +12,14 @@ import java.util.UUID;
 import org.bukkit.Art;
 import org.bukkit.Bukkit;
 import org.bukkit.DyeColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Banner;
 import org.bukkit.block.Barrel;
 import org.bukkit.block.BlastFurnace;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.BrewingStand;
 import org.bukkit.block.Campfire;
@@ -46,6 +48,7 @@ import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.Painting;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.material.Attachable;
 
 import com.destroystokyo.paper.profile.PlayerProfile;
 import com.destroystokyo.paper.profile.ProfileProperty;
@@ -74,13 +77,13 @@ public final class BlockEntityIO {
 
     private static Set<Material> buildBlockEntityMaterials() {
         Set<Material> materials = EnumSet.noneOf(Material.class);
+        // ItemFrame et Painting sont des entités, jamais des BlockState :
+        // leur capture relève de la Vague 3.1 (capture d'entités).
         for (Material material : Material.values()) {
             String name = material.name();
             if (name.endsWith("_SIGN") || name.endsWith("_BANNER")
                     || name.endsWith("_HEAD") || name.endsWith("_SKULL")
-                    || name.endsWith("_SHULKER_BOX")
-                    || name.endsWith("_ITEM_FRAME")
-                    || name.endsWith("_PAINTING")) {
+                    || name.endsWith("_SHULKER_BOX")) {
                 materials.add(material);
             }
         }
@@ -127,12 +130,6 @@ public final class BlockEntityIO {
         } else if (state instanceof Jukebox jukebox) {
             id = "minecraft:jukebox";
             data = itemsData(captureSingleItem(jukebox.getRecord()));
-        } else if (state instanceof ItemFrame itemFrame) {
-            id = "minecraft:item_frame";
-            data = captureItemFrame(itemFrame);
-        } else if (state instanceof Painting painting) {
-            id = "minecraft:painting";
-            data = capturePainting(painting);
         } else if (state instanceof Container container) {
             id = containerId(state);
             data = id == null ? null : itemsData(captureItems(container.getInventory()));
@@ -393,7 +390,7 @@ public final class BlockEntityIO {
         }
         String name = profileMap.get("name") instanceof String n && !n.isBlank() ? n : null;
         PlayerProfile profile = name != null
-                ? Bukkit.createProfile(UUID.randomUUID(), name)
+                ? Bukkit.createProfile(UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes()), name)
                 : Bukkit.createProfile(UUID.randomUUID());
         addModernProperties(profile, profileMap.get("properties"));
         addLegacyTextures(profile, profileMap.get("Properties"));
@@ -517,28 +514,177 @@ public final class BlockEntityIO {
         return RegistryAccess.registryAccess().getRegistry(RegistryKey.BANNER_PATTERN).get(key);
     }
 
-    private static Map<String, Object> captureItemFrame(ItemFrame itemFrame) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        ItemStack item = itemFrame.getItem();
-        if (item != null && item.getType() != Material.AIR) {
-            data.put("item", item.serializeAsBytes());
-        } else {
-            data.put("item", null);
-        }
-        data.put("rotation", itemFrame.getRotation());
-        return data;
-    }
-
-    private static Map<String, Object> capturePainting(Painting painting) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        Art art = painting.getArt();
-        data.put("painting", art.toString().toLowerCase(Locale.ROOT));
-        // Orientation is handled via block data in Paper 26.2, stored as rotation
-        data.put("orientation", "unknown");
-        return data;
-    }
-
     private static int asInt(Object value) {
         return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    /**
+     * Capture les entités ItemFrame et Painting dans une région du monde.
+     * Retourne une liste d'entrées (format Id + Pos + données) prêtes à être
+     * stockées dans le schematic. Tolérant : une exception (monde mocké, etc.)
+     * retourne une liste vide.
+     */
+    public static List<Map<String, Object>> captureEntities(World world, int minX, int minY, int minZ,
+                                                             int sizeX, int sizeY, int sizeZ) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            for (ItemFrame frame : world.getEntitiesByClass(ItemFrame.class)) {
+                Map<String, Object> entry = captureItemFrame(frame, minX, minY, minZ, sizeX, sizeY, sizeZ);
+                if (entry != null) {
+                    result.add(entry);
+                }
+            }
+            for (Painting painting : world.getEntitiesByClass(Painting.class)) {
+                Map<String, Object> entry = capturePainting(painting, minX, minY, minZ, sizeX, sizeY, sizeZ);
+                if (entry != null) {
+                    result.add(entry);
+                }
+            }
+        } catch (Exception ignored) {
+            // Monde mocké ou inaccessible : pas d'entités capturées.
+        }
+        return result;
+    }
+
+    private static Map<String, Object> captureItemFrame(ItemFrame frame, int minX, int minY, int minZ,
+                                                         int sizeX, int sizeY, int sizeZ) {
+        // Position du bloc auquel l'entité est attachée.
+        // getLocation().getBlock() est incorrect pour les faces NORTH/WEST/DOWN
+        // (l'entité est légèrement décalée hors du bloc) : on ajuste via la face.
+        BlockFace face = ((Attachable) frame).getAttachedFace();
+        org.bukkit.block.Block attached = frame.getLocation().getBlock();
+        if (face.getModX() < 0 || face.getModY() < 0 || face.getModZ() < 0) {
+            attached = attached.getRelative(face.getOppositeFace());
+        }
+        int dx = attached.getX() - minX;
+        int dy = attached.getY() - minY;
+        int dz = attached.getZ() - minZ;
+        if (dx < 0 || dx >= sizeX || dy < 0 || dy >= sizeY || dz < 0 || dz >= sizeZ) {
+            return null;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        ItemStack item = frame.getItem();
+        if (item.getType() != Material.AIR) {
+            try {
+                data.put("item", item.serializeAsBytes());
+            } catch (Exception ignored) {
+            }
+        }
+        data.put("rotation", frame.getRotation().name().toLowerCase(Locale.ROOT));
+        data.put("facing", ((Attachable) frame).getAttachedFace().name());
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Id", "minecraft:item_frame");
+        entry.put("Pos", List.of(dx, dy, dz));
+        entry.putAll(data);
+        return entry;
+    }
+
+    @SuppressWarnings("removal") // Art.name() est déprécié mais reste le seul accesseur
+    private static Map<String, Object> capturePainting(Painting painting, int minX, int minY, int minZ,
+                                                        int sizeX, int sizeY, int sizeZ) {
+        // Position du bloc auquel l'entité est attachée (même logique que ItemFrame).
+        BlockFace face = ((Attachable) painting).getAttachedFace();
+        org.bukkit.block.Block attached = painting.getLocation().getBlock();
+        if (face.getModX() < 0 || face.getModY() < 0 || face.getModZ() < 0) {
+            attached = attached.getRelative(face.getOppositeFace());
+        }
+        int dx = attached.getX() - minX;
+        int dy = attached.getY() - minY;
+        int dz = attached.getZ() - minZ;
+        if (dx < 0 || dx >= sizeX || dy < 0 || dy >= sizeY || dz < 0 || dz >= sizeZ) {
+            return null;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("art", painting.getArt().name().toLowerCase(Locale.ROOT));
+        data.put("facing", ((Attachable) painting).getAttachedFace().name());
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Id", "minecraft:painting");
+        entry.put("Pos", List.of(dx, dy, dz));
+        entry.putAll(data);
+        return entry;
+    }
+
+    /**
+     * Applique une entrée d'entité (ItemFrame ou Painting) en la faisant
+     * apparaître à la position relative du schematic. Tolérant : une entrée
+     * illisible ou un spawn qui échoue est ignoré.
+     */
+    public static void applyEntity(World world, int minX, int minY, int minZ, Map<String, Object> entry) {
+        String id = entry.get("Id") instanceof String s ? s : null;
+        if (id == null) {
+            return;
+        }
+        Object posObject = entry.get("Pos");
+        int dx, dy, dz;
+        if (posObject instanceof List<?> pos && pos.size() == 3) {
+            dx = asInt(pos.get(0));
+            dy = asInt(pos.get(1));
+            dz = asInt(pos.get(2));
+        } else if (posObject instanceof int[] pos && pos.length == 3) {
+            dx = pos[0];
+            dy = pos[1];
+            dz = pos[2];
+        } else {
+            return;
+        }
+        // Pos = bloc du mur (solide). Les entités attachables vivent dans le bloc
+        // d'air DEVANT le mur : spawnner dans le bloc solide fait tomber l'entité.
+        Location loc = new Location(world, minX + dx + 0.5, minY + dy + 0.5, minZ + dz + 0.5);
+        if (entry.get("facing") instanceof String facing) {
+            try {
+                BlockFace face = BlockFace.valueOf(facing);
+                loc.add(face.getModX(), face.getModY(), face.getModZ());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        try {
+            if ("minecraft:item_frame".equals(id)) {
+                applyItemFrame(world, loc, entry);
+            } else if ("minecraft:painting".equals(id)) {
+                applyPainting(world, loc, entry);
+            }
+        } catch (Exception ignored) {
+            // Tolérance : un spawn qui échoue ne doit jamais interrompre un collage.
+        }
+    }
+
+    private static void applyItemFrame(World world, Location loc, Map<String, Object> entry) {
+        ItemFrame frame = (ItemFrame) world.spawnEntity(loc, EntityType.ITEM_FRAME);
+        if (entry.get("rotation") instanceof String rotation) {
+            try {
+                frame.setRotation(org.bukkit.Rotation.valueOf(rotation.toUpperCase(Locale.ROOT)));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (entry.get("facing") instanceof String facing) {
+            try {
+                frame.setFacingDirection(BlockFace.valueOf(facing), true);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (entry.get("item") instanceof byte[] itemData) {
+            try {
+                frame.setItem(ItemStack.deserializeBytes(itemData), false);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @SuppressWarnings("removal") // Art.valueOf() est déprécié mais reste le seul accesseur
+    private static void applyPainting(World world, Location loc, Map<String, Object> entry) {
+        Painting painting = (Painting) world.spawnEntity(loc, EntityType.PAINTING);
+        if (entry.get("art") instanceof String artName) {
+            try {
+                Art art = Art.valueOf(artName.toUpperCase(Locale.ROOT));
+                painting.setArt(art, true);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (entry.get("facing") instanceof String facing) {
+            try {
+                painting.setFacingDirection(BlockFace.valueOf(facing), true);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
     }
 }

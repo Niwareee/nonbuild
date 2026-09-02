@@ -1,15 +1,20 @@
 package fr.niware.nonbuild.schematic;
 
-import com.destroystokyo.paper.profile.PlayerProfile;
-import com.destroystokyo.paper.profile.ProfileProperty;
-import fr.niware.nonbuild.testutil.BukkitServerFixture;
-import net.kyori.adventure.text.Component;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
 import org.bukkit.Bukkit;
 import org.bukkit.DyeColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Banner;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Campfire;
 import org.bukkit.block.Chest;
@@ -22,28 +27,23 @@ import org.bukkit.block.banner.PatternType;
 import org.bukkit.block.sign.Side;
 import org.bukkit.block.sign.SignSide;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.ItemFrame;
+import org.bukkit.entity.Painting;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
-
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-
+import org.bukkit.material.Attachable;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import org.mockito.MockedStatic;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -51,6 +51,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+
+import com.destroystokyo.paper.profile.PlayerProfile;
+import com.destroystokyo.paper.profile.ProfileProperty;
+
+import fr.niware.nonbuild.testutil.BukkitServerFixture;
+import net.kyori.adventure.text.Component;
 
 /**
  * Capture et application des block entities : données sérialisées fidèlement
@@ -488,5 +494,134 @@ class BlockEntityIOTest {
         }).when(created).setProperty(any(ProfileProperty.class));
         when(created.getProperties()).thenAnswer(inv -> properties);
         return created;
+    }
+
+    // === Entity capture tests (ItemFrame / Painting) ===
+
+    @Test
+    void captureEntitiesRetourneVideSiAucuneEntite() {
+        World world = mock(World.class);
+        when(world.getEntitiesByClass(ItemFrame.class)).thenReturn(List.of());
+        when(world.getEntitiesByClass(Painting.class)).thenReturn(List.of());
+
+        List<Map<String, Object>> result = BlockEntityIO.captureEntities(world, 0, 64, 0, 10, 10, 10);
+
+        assertEquals(0, result.size());
+    }
+
+    @Test
+    void captureEntitiesCaptureUnItemFrameDansLaRegion() {
+        World world = mock(World.class);
+        ItemFrame frame = mock(ItemFrame.class);
+        org.bukkit.block.Block locationBlock = mock(org.bukkit.block.Block.class);
+        org.bukkit.block.Block attached = mock(org.bukkit.block.Block.class);
+        Location frameLoc = mock(Location.class);
+        when(frame.getLocation()).thenReturn(frameLoc);
+        when(frameLoc.getBlock()).thenReturn(locationBlock);
+        // NORTH → face.getModZ() < 0 → getRelative(SOUTH) = bloc attaché
+        when(locationBlock.getRelative(BlockFace.SOUTH)).thenReturn(attached);
+        when(attached.getX()).thenReturn(5);
+        when(attached.getY()).thenReturn(68);
+        when(attached.getZ()).thenReturn(5);
+        when(frame.getItem()).thenReturn(mock(ItemStack.class));
+        when(frame.getRotation()).thenReturn(org.bukkit.Rotation.CLOCKWISE);
+        when(((Attachable) frame).getAttachedFace()).thenReturn(BlockFace.NORTH);
+        when(world.getEntitiesByClass(ItemFrame.class)).thenReturn(List.of(frame));
+        when(world.getEntitiesByClass(Painting.class)).thenReturn(List.of());
+
+        List<Map<String, Object>> result = BlockEntityIO.captureEntities(world, 0, 64, 0, 10, 10, 10);
+
+        assertEquals(1, result.size());
+        assertEquals("minecraft:item_frame", result.get(0).get("Id"));
+        assertEquals(List.of(5, 4, 5), result.get(0).get("Pos"));
+        assertEquals("clockwise", result.get(0).get("rotation"));
+        assertEquals("NORTH", result.get(0).get("facing"));
+    }
+
+    @Test
+    void captureEntitiesIgnoreUnItemFrameHorsRegion() {
+        World world = mock(World.class);
+        ItemFrame frame = mock(ItemFrame.class);
+        when(frame.getX()).thenReturn(15.0); // hors région (0..9)
+        when(frame.getY()).thenReturn(68.0);
+        when(frame.getZ()).thenReturn(5.0);
+        when(world.getEntitiesByClass(ItemFrame.class)).thenReturn(List.of(frame));
+        when(world.getEntitiesByClass(Painting.class)).thenReturn(List.of());
+
+        List<Map<String, Object>> result = BlockEntityIO.captureEntities(world, 0, 64, 0, 10, 10, 10);
+
+        assertEquals(0, result.size());
+    }
+
+    @Test
+    void captureEntitiesEstTolerantAuxExceptions() {
+        World world = mock(World.class);
+        when(world.getEntitiesByClass(ItemFrame.class)).thenThrow(new RuntimeException("mock"));
+
+        List<Map<String, Object>> result = BlockEntityIO.captureEntities(world, 0, 64, 0, 10, 10, 10);
+
+        assertEquals(0, result.size()); // pas d'exception levée
+    }
+
+    // === Entity apply tests ===
+
+    @Test
+    void applyEntitySpawnUnItemFrameAvecRotationEtFacing() {
+        World world = mock(World.class);
+        ItemFrame frame = mock(ItemFrame.class);
+        when(world.spawnEntity(any(Location.class), eq(EntityType.ITEM_FRAME))).thenReturn(frame);
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Id", "minecraft:item_frame");
+        entry.put("Pos", List.of(2, 3, 4));
+        entry.put("rotation", "counter_clockwise");
+        entry.put("facing", "SOUTH");
+
+        BlockEntityIO.applyEntity(world, 10, 64, 10, entry);
+
+        // Spawn dans le bloc d'air devant le mur (Pos + facing), pas dans le bloc solide.
+        verify(world).spawnEntity(eq(new Location(world, 12.5, 67.5, 15.5)), eq(EntityType.ITEM_FRAME));
+        verify(frame).setRotation(org.bukkit.Rotation.COUNTER_CLOCKWISE);
+        verify(frame).setFacingDirection(BlockFace.SOUTH, true);
+    }
+
+    @Test
+    void applyEntitySansFacingSpawnAuCentreDuBloc() {
+        World world = mock(World.class);
+        ItemFrame frame = mock(ItemFrame.class);
+        when(world.spawnEntity(any(Location.class), eq(EntityType.ITEM_FRAME))).thenReturn(frame);
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Id", "minecraft:item_frame");
+        entry.put("Pos", List.of(2, 3, 4));
+
+        BlockEntityIO.applyEntity(world, 10, 64, 10, entry);
+
+        verify(world).spawnEntity(eq(new Location(world, 12.5, 67.5, 14.5)), eq(EntityType.ITEM_FRAME));
+    }
+
+    @Test
+    void applyEntityIgnoreUneEntiteInconnue() {
+        World world = mock(World.class);
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Id", "minecraft:cow");
+        entry.put("Pos", List.of(0, 0, 0));
+
+        BlockEntityIO.applyEntity(world, 0, 64, 0, entry);
+
+        verify(world, never()).spawnEntity(any(Location.class), any(EntityType.class));
+    }
+
+    @Test
+    void applyEntityIgnoreUneEntreeSansPos() {
+        World world = mock(World.class);
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Id", "minecraft:item_frame");
+
+        BlockEntityIO.applyEntity(world, 0, 64, 0, entry);
+
+        verify(world, never()).spawnEntity(any(Location.class), any(EntityType.class));
     }
 }

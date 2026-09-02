@@ -1,17 +1,17 @@
 package fr.niware.nonbuild.command;
 
-import fr.niware.nonbuild.NonBuild;
-import fr.niware.nonbuild.Settings;
-import fr.niware.nonbuild.edit.SessionManager;
-import fr.niware.nonbuild.model.Arena;
-import fr.niware.nonbuild.model.DeployedInstance;
-import fr.niware.nonbuild.model.Point;
-import fr.niware.nonbuild.schematic.Nbt;
-import fr.niware.nonbuild.schematic.SpongeSchematic;
-import fr.niware.nonbuild.storage.ArenaStorage;
-import fr.niware.nonbuild.storage.DeploymentStorage;
-import fr.niware.nonbuild.testutil.BukkitServerFixture;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Logger;
+
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -23,25 +23,14 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.logging.Logger;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -55,6 +44,18 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import fr.niware.nonbuild.NonBuild;
+import fr.niware.nonbuild.Settings;
+import fr.niware.nonbuild.edit.SessionManager;
+import fr.niware.nonbuild.model.Arena;
+import fr.niware.nonbuild.model.DeployedInstance;
+import fr.niware.nonbuild.model.Point;
+import fr.niware.nonbuild.schematic.Nbt;
+import fr.niware.nonbuild.schematic.SpongeSchematic;
+import fr.niware.nonbuild.storage.ArenaStorage;
+import fr.niware.nonbuild.storage.DeploymentStorage;
+import fr.niware.nonbuild.testutil.BukkitServerFixture;
 
 /**
  * Tests de FLUX du moteur de déploiement : registre, fichiers, blocs posés
@@ -72,6 +73,7 @@ class DeployCommandTest {
     private DeployCommand command;
     private CommandSender console;
     private World prodWorld;
+    private Chunk prodChunk;
     private Block prodBlock;
     private BlockData airData;
     private YamlConfiguration config;
@@ -90,17 +92,6 @@ class DeployCommandTest {
         arenas = new ArenaStorage(storagePlugin);
         deployments = new DeploymentStorage(storagePlugin);
 
-        config = new YamlConfiguration();
-        JavaPlugin settingsPlugin = mock(JavaPlugin.class);
-        when(settingsPlugin.getConfig()).thenReturn(config);
-
-        plugin = mock(NonBuild.class);
-        when(plugin.getSettings()).thenReturn(new Settings(settingsPlugin));
-        when(plugin.getArenas()).thenReturn(arenas);
-        when(plugin.getDeployments()).thenReturn(deployments);
-        when(plugin.getSessions()).thenReturn(new SessionManager());
-        when(plugin.getLogger()).thenReturn(Logger.getLogger("DeployCommandTest"));
-
         console = mock(CommandSender.class);
 
         prodWorld = mock(World.class);
@@ -108,12 +99,37 @@ class DeployCommandTest {
         when(prodWorld.getMinHeight()).thenReturn(-64);
         when(prodWorld.getMaxHeight()).thenReturn(320);
         prodBlock = mock(Block.class);
-        when(prodWorld.getBlockAt(anyInt(), anyInt(), anyInt())).thenReturn(prodBlock);
+        prodChunk = mock(Chunk.class);
+        when(prodWorld.getChunkAt(anyInt(), anyInt())).thenReturn(prodChunk);
+        when(prodChunk.getBlock(anyInt(), anyInt(), anyInt())).thenReturn(prodBlock);
+        when(prodWorld.getChunkAtAsync(anyInt(), anyInt()))
+                .thenReturn(CompletableFuture.completedFuture(mock(Chunk.class)));
 
         when(Bukkit.getServer().createBlockData(anyString())).thenAnswer(inv -> mock(BlockData.class));
         airData = mock(BlockData.class);
         when(Bukkit.getServer().createBlockData(Material.AIR)).thenReturn(airData);
 
+        // Settings cache les valeurs au constructeur → config par défaut vide
+        config = new YamlConfiguration();
+        initSettings(config);
+    }
+
+    /**
+     * Reconfigure Settings avec une config donnée (Settings cache les valeurs
+     * au constructeur, donc on reconstruit le mock plugin).
+     */
+    private void initSettings(YamlConfiguration cfg) {
+        config = cfg;
+        JavaPlugin settingsPlugin = mock(JavaPlugin.class);
+        when(settingsPlugin.getConfig()).thenReturn(config);
+        Settings settings = new Settings(settingsPlugin);
+
+        plugin = mock(NonBuild.class);
+        when(plugin.getSettings()).thenReturn(settings);
+        when(plugin.getArenas()).thenReturn(arenas);
+        when(plugin.getDeployments()).thenReturn(deployments);
+        when(plugin.getSessions()).thenReturn(new SessionManager());
+        when(plugin.getLogger()).thenReturn(Logger.getLogger("DeployCommandTest"));
         command = new DeployCommand(plugin);
     }
 
@@ -228,6 +244,7 @@ class DeployCommandTest {
     void deployAvecUneHauteurIncompatibleNeDeploieRien() throws IOException {
         prepareArena();
         config.set("placement.paste-y", 318);
+        initSettings(config);
         SpongeSchematic schematic = SpongeSchematic.create(2, 5, 2, new int[20], List.of("minecraft:stone"));
         schematic.write(arenas.schematicFile("getdown"));
         prodWorldOnline();
@@ -243,6 +260,7 @@ class DeployCommandTest {
     void deployColleAHauteurConfigurée() throws IOException {
         prepareArena();
         config.set("placement.paste-y", 100);
+        initSettings(config);
         prodWorldOnline();
 
         run("getdown", "1");
@@ -282,11 +300,13 @@ class DeployCommandTest {
         prodWorldOnline();
 
         config.set("placement.paste-y", 100);
+        initSettings(config);
         run("getdown", "1");
         drainScheduledTasks();
         assertEquals(100, deployments.get("getdown-1").getCorner1()[1]);
 
         config.set("placement.paste-y", 80);
+        initSettings(config);
         run("getdown", "1");
         drainScheduledTasks();
 
@@ -411,7 +431,7 @@ class DeployCommandTest {
     void uneErreurDeCollageNeLenregistrePas() throws IOException {
         prepareArena();
         prodWorldOnline();
-        when(prodWorld.getBlockAt(anyInt(), anyInt(), anyInt()))
+        when(prodChunk.getBlock(anyInt(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("chunk non chargé"));
 
         run("getdown", "1");
@@ -425,11 +445,13 @@ class DeployCommandTest {
         prepareArena();
         prodWorldOnline();
         config.set("placement.paste-y", 100);
+        initSettings(config);
         run("getdown", "1");
         drainScheduledTasks();
 
         config.set("placement.paste-y", 80); // force l'effacement préalable
-        when(prodWorld.getBlockAt(anyInt(), anyInt(), anyInt()))
+        initSettings(config);
+        when(prodChunk.getBlock(anyInt(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("chunk non chargé"));
         run("getdown", "1");
         drainScheduledTasks();
@@ -516,7 +538,7 @@ class DeployCommandTest {
         run("getdown", "1");
         drainScheduledTasks();
 
-        when(prodWorld.getBlockAt(anyInt(), anyInt(), anyInt()))
+        when(prodChunk.getBlock(anyInt(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("chunk non chargé"));
         run("remove", "getdown-1");
         drainScheduledTasks();
@@ -531,6 +553,7 @@ class DeployCommandTest {
         run("getdown", "1");
         drainScheduledTasks();
 
+        clearInvocations(prodWorld); // le collage a déjà préchargé des chunks, on ne compte que le tp
         when(prodWorld.getChunkAtAsync(anyInt(), anyInt()))
                 .thenReturn(CompletableFuture.completedFuture(mock(org.bukkit.Chunk.class)));
 
@@ -622,7 +645,8 @@ class DeployCommandTest {
         when(player.isOnline()).thenReturn(true);
         runAs(player, "tp", "getdown-1");
         verify(player, never()).teleport(any(Location.class));
-        verify(prodWorld, never()).getChunkAtAsync(anyInt(), anyInt());
+        // NB : le collage en cours précharge lui aussi les chunks (getChunkAtAsync),
+        // on ne peut donc pas assert never() ici ; la garde est portée par le teleport.
 
         drainScheduledTasks(); // collage terminé : la garde est levée
 
@@ -671,6 +695,22 @@ class DeployCommandTest {
         run("getdown", "1");
         drainScheduledTasks();
         assertTrue(run("tp", "getdown-1")); // pas d'exception, pas de téléport possible
+    }
+
+    @Test
+    void tpNeCreePasLeMondeSiIlNestPasCharge() throws IOException {
+        prepareArena();
+        prodWorldOnline();
+        run("getdown", "1");
+        drainScheduledTasks();
+
+        when(Bukkit.getServer().getWorld("world")).thenReturn(null);
+        Player player = mock(Player.class);
+        runAs(player, "tp", "getdown-1");
+
+        // plus de création on-demand : le monde absent est refusé, pas créé
+        verify(Bukkit.getServer(), never()).createWorld(any(WorldCreator.class));
+        verify(player, never()).teleport(any(Location.class));
     }
 
     @Test
@@ -734,6 +774,7 @@ class DeployCommandTest {
     // ────────────────────────────── rebuild ──────────────────────────────
 
     private World newWorld;
+    private Chunk newChunk;
     private Block newBlock;
 
     private void prepareSpawnSchematic(int size) throws IOException {
@@ -760,7 +801,11 @@ class DeployCommandTest {
         when(newWorld.getMinHeight()).thenReturn(-64);
         when(newWorld.getMaxHeight()).thenReturn(320);
         newBlock = mock(Block.class);
-        when(newWorld.getBlockAt(anyInt(), anyInt(), anyInt())).thenReturn(newBlock);
+        newChunk = mock(Chunk.class);
+        when(newWorld.getChunkAt(anyInt(), anyInt())).thenReturn(newChunk);
+        when(newChunk.getBlock(anyInt(), anyInt(), anyInt())).thenReturn(newBlock);
+        when(newWorld.getChunkAtAsync(anyInt(), anyInt()))
+                .thenReturn(CompletableFuture.completedFuture(mock(Chunk.class)));
 
         when(Bukkit.getServer().isTickingWorlds()).thenReturn(false);
         when(Bukkit.getServer().unloadWorld("world", false)).thenReturn(true);

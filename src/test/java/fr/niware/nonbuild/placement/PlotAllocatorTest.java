@@ -1,7 +1,5 @@
 package fr.niware.nonbuild.placement;
 
-import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -9,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 class PlotAllocatorTest {
 
@@ -103,5 +102,45 @@ class PlotAllocatorTest {
         assertEquals(200, cell.minZ());
         assertEquals(100 + 50 + 2 * MARGIN - 1, cell.maxX());
         assertEquals(200 + 60 + 2 * MARGIN - 1, cell.maxZ());
+    }
+
+    @Test
+    void uneGrandeMargeNeProvoqueNiChevauchementNiTropDeDistance() {
+        // Cas live : marge 256 → cellules de ~45 chunks. La spirale avance par pas
+        // de cellule ; on vérifie que le placement reste sans chevauchement, aligné
+        // chunk, et que la première cellule reste raisonnablement proche du spawn.
+        int largeMargin = 256;
+        PlotAllocator allocator = new PlotAllocator(RADIUS, largeMargin);
+        List<Region2D> cells = new ArrayList<>();
+
+        for (int i = 0; i < 40; i++) {
+            int sizeX = 60 + (i * 13) % 80;
+            int sizeZ = 60 + (i * 23) % 80;
+            int[] cellMin = allocator.allocate(sizeX, sizeZ);
+            assertNotNull(cellMin, "allocation " + i + " a échoué");
+            assertEquals(0, cellMin[0] % 16);
+            assertEquals(0, cellMin[1] % 16);
+
+            Region2D cell = allocator.cellFor(cellMin, sizeX, sizeZ);
+            for (Region2D previous : cells) {
+                assertFalse(cell.intersects(previous),
+                        "chevauchement entre la cellule " + cells.size() + " et une précédente");
+            }
+            boolean horsZone = cell.minX() > RADIUS || cell.maxX() < -RADIUS
+                    || cell.minZ() > RADIUS || cell.maxZ() < -RADIUS;
+            assertTrue(horsZone, "cellule dans la zone protégée : " + cell);
+            allocator.addOccupied(cell);
+            cells.add(cell);
+        }
+
+        // La première cellule doit rester proche de la zone protégée. Le pas de la
+        // spirale (une cellule) peut « sauter » au-delà du bord de la zone protégée
+        // d'au plus un pas : on borne généreusement pour ne pas verrouiller la
+        // compacité exacte, tout en détectant un saut anormal.
+        Region2D first = cells.get(0);
+        long distance = Math.max(Math.max(Math.abs(first.minX()), Math.abs(first.maxX())),
+                Math.max(Math.abs(first.minZ()), Math.abs(first.maxZ())));
+        assertTrue(distance <= RADIUS + 4 * largeMargin + 16,
+                "première cellule trop loin du spawn : " + distance);
     }
 }

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -40,7 +41,7 @@ public final class GoalGUI implements Listener {
  * Fabrique d'ItemStack — package-private pour les tests (Paper 26.2:
  * ItemStack a un craftDelegate interne impossible à mocker).
  */
-    java.util.function.Function<Material, ItemStack> itemFactory = mat -> new ItemStack(mat);
+    Function<Material, ItemStack> itemFactory = ItemStack::new;
 
     public GoalGUI(NonBuild plugin) {
         this.plugin = plugin;
@@ -51,7 +52,7 @@ public final class GoalGUI implements Listener {
      * Ouvre le GUI au joueur.
      */
     public void open(Player player) {
-        Inventory inv = Bukkit.createInventory(null, SLOTS, TITLE);
+        Inventory inv = Bukkit.createInventory(null, SLOTS, Component.text(TITLE));
 
         Map<String, String> gameModes = plugin.getSettings().gameModes();
         int slot = 0;
@@ -61,7 +62,9 @@ public final class GoalGUI implements Listener {
 
             String modeKey = entry.getKey();
             String modeName = entry.getValue();
-            List<DeployedInstance> instances = plugin.getDeployments().byGameMode(modeKey);
+            // Résoudre les slugs via le champ game-mode explicite de l'arène
+            java.util.Collection<String> arenaSlugs = plugin.getArenas().byGameMode(modeKey);
+            List<DeployedInstance> instances = plugin.getDeployments().byArenaSlugs(arenaSlugs);
 
             ItemStack item = createModeItem(modeKey, modeName, instances);
             inv.setItem(slot, item);
@@ -76,12 +79,11 @@ public final class GoalGUI implements Listener {
         ItemStack item = itemFactory.apply(material);
         ItemMeta meta = item.getItemMeta();
 
-        List<String> lore = new ArrayList<>();
-        lore.add("§7" + modeName);
-        lore.add("");
+        List<Component> lore = new ArrayList<>();
+        lore.add(Component.empty());
 
         if (instances.isEmpty()) {
-            lore.add("§cAucune map déployée");
+            lore.add(Component.text("§cAucune map déployée"));
         } else {
             // Regrouper par slug d'arène
             Map<String, Integer> arenaCount = new LinkedHashMap<>();
@@ -89,7 +91,7 @@ public final class GoalGUI implements Listener {
                 arenaCount.merge(inst.getArena(), 1, Integer::sum);
             }
 
-            lore.add("§aArènes déployées :");
+            lore.add(Component.text("§aArènes déployées :"));
             for (Map.Entry<String, Integer> e : arenaCount.entrySet()) {
                 String arenaSlug = e.getKey();
                 int count = e.getValue();
@@ -98,12 +100,12 @@ public final class GoalGUI implements Listener {
                 if (arena != null) {
                     displayName = arena.getDisplayName();
                 }
-                lore.add("  §f" + displayName + " §7(" + count + " instance" + (count > 1 ? "s" : "") + ")");
+                lore.add(Component.text("  §f" + displayName + " §7(" + count + " instance" + (count > 1 ? "s" : "") + ")"));
             }
         }
 
-        meta.setDisplayName("§e" + modeName);
-        meta.setLore(lore);
+        meta.displayName(Component.text("§e" + modeName));
+        meta.lore(lore);
         meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
         item.setItemMeta(meta);
         return item;

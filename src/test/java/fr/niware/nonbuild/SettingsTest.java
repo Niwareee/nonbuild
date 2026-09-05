@@ -2,11 +2,10 @@ package fr.niware.nonbuild;
 
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -32,7 +31,6 @@ class SettingsTest {
         assertEquals(60, settings.pasteY());
         assertEquals(20_000, settings.blocksPerTick());
         assertEquals(50_000, settings.captureBlocksPerTick());
-        assertEquals(4_000_000, settings.maxVolume());
         assertTrue(settings.setCreativeOnEdit());
     }
 
@@ -49,8 +47,6 @@ class SettingsTest {
                 pasting:
                   blocks-per-tick: 5000
                   capture-blocks-per-tick: 8000
-                limits:
-                  max-volume: 100000
                 edit:
                   set-creative: false
                 """);
@@ -61,7 +57,6 @@ class SettingsTest {
         assertEquals(98, settings.pasteY());
         assertEquals(5000, settings.blocksPerTick());
         assertEquals(8000, settings.captureBlocksPerTick());
-        assertEquals(100_000, settings.maxVolume());
         assertFalse(settings.setCreativeOnEdit());
     }
 

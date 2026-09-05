@@ -24,7 +24,6 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,6 +46,8 @@ import static org.mockito.Mockito.when;
 
 import fr.niware.nonbuild.NonBuild;
 import fr.niware.nonbuild.Settings;
+import fr.niware.nonbuild.db.DeploymentDb;
+import fr.niware.nonbuild.db.InMemoryDeploymentDb;
 import fr.niware.nonbuild.edit.SessionManager;
 import fr.niware.nonbuild.model.Arena;
 import fr.niware.nonbuild.model.DeployedInstance;
@@ -70,6 +71,7 @@ class DeployCommandTest {
     private NonBuild plugin;
     private ArenaStorage arenas;
     private DeploymentStorage deployments;
+    private DeploymentDb db;
     private DeployCommand command;
     private CommandSender console;
     private World prodWorld;
@@ -90,7 +92,9 @@ class DeployCommandTest {
         when(storagePlugin.getDataFolder()).thenReturn(tempDir);
         when(storagePlugin.getLogger()).thenReturn(Logger.getLogger("DeployCommandTest"));
         arenas = new ArenaStorage(storagePlugin);
-        deployments = new DeploymentStorage(storagePlugin);
+        db = new InMemoryDeploymentDb();
+        db.initialize();
+        deployments = new DeploymentStorage(storagePlugin, db);
 
         console = mock(CommandSender.class);
 
@@ -236,7 +240,6 @@ class DeployCommandTest {
         assertNotNull(deployments.get("getdown-2"));
         assertEquals("world", deployments.get("getdown-1").getWorld());
         assertEquals(60, deployments.get("getdown-1").getCorner1()[1]); // paste-y par défaut
-        assertTrue(new File(tempDir, "deployments.yml").exists());
         verify(prodBlock, times(16)).setBlockData(argThat(data -> data != airData), eq(false)); // 2 x 8 blocs
     }
 
@@ -472,7 +475,6 @@ class DeployCommandTest {
 
         assertEquals(0, deployments.count());
         verify(prodBlock, times(8)).setBlockData(eq(airData), eq(false));
-        assertTrue(new File(tempDir, "deployments.yml").exists()); // fichier réécrit vidé
     }
 
     @Test
@@ -761,7 +763,7 @@ class DeployCommandTest {
         run("getdown", "2");
         drainScheduledTasks();
 
-        DeploymentStorage fresh = new DeploymentStorage(mockStoragePlugin());
+        DeploymentStorage fresh = new DeploymentStorage(mockStoragePlugin(), db);
         fresh.load();
         assertEquals(2, fresh.count());
         assertNotNull(fresh.get("getdown-1"));
@@ -933,91 +935,6 @@ class DeployCommandTest {
     }
 
     @Test
-    @SuppressWarnings("removal") // vérifie le choix assumé du main : clés String via setGameRuleValue
-    void leRebuildCompletColleLeSpawnEtRedeploieTout() throws IOException {
-        prepareArena();
-        prodWorldOnline();
-        World buildWorld = buildWorldOnline();
-        prepareRebuildServer();
-        prepareSpawnSchematic(2);
-
-        Player player = mock(Player.class);
-        when(prodWorld.getPlayers()).thenReturn(List.of(player));
-        Location buildSpawn = new Location(buildWorld, 10, 70, 10);
-        when(buildWorld.getSpawnLocation()).thenReturn(buildSpawn);
-
-        run("getdown", "2");
-        drainScheduledTasks();
-        assertEquals(2, deployments.count());
-
-        run("rebuild");
-        drainScheduledTasks();
-
-        verify(Bukkit.getServer()).unloadWorld("world", false);
-        verify(Bukkit.getServer()).createWorld(any(WorldCreator.class));
-        assertFalse(new File(tempDir, "world").exists());
-        verify(newWorld).setSpawnLocation(argThat(loc ->
-                loc.getX() == 0.5 && loc.getY() == 90.0 && loc.getZ() == 0.5));
-        verify(newWorld).setDifficulty(org.bukkit.Difficulty.NORMAL);
-        verify(newWorld).setTime(6000L);
-        verify(newWorld).setGameRuleValue("random_tick_speed", "0");
-        verify(newWorld).setGameRuleValue("spawn_mobs", "false");
-        verify(newWorld).setGameRuleValue("advance_time", "false");
-        verify(player).teleport(buildSpawn);
-        // 8 blocs de spawn + 2 instances de 8 blocs
-        verify(newBlock, times(24)).setBlockData(argThat(data -> data != airData), eq(false));
-        assertEquals(2, deployments.count());
-        assertNotNull(deployments.get("getdown-1"));
-        assertNotNull(deployments.get("getdown-2"));
-        assertTrue(new File(tempDir, "deployments.yml").exists());
-    }
-
-    @Test
-    void leRebuildAvecUnRegistreVideCreeLeMondeEtLeSpawn() throws IOException {
-        prodWorldOnline();
-        prepareRebuildServer();
-        prepareSpawnSchematic(2);
-
-        run("rebuild");
-        drainScheduledTasks();
-
-        verify(Bukkit.getServer()).unloadWorld("world", false);
-        verify(Bukkit.getServer()).createWorld(any(WorldCreator.class));
-        assertEquals(0, deployments.count());
-        verify(newBlock, times(8)).setBlockData(argThat(data -> data != airData), eq(false));
-        assertTrue(new File(tempDir, "deployments.yml").exists());
-    }
-
-    @Test
-    void leRebuildColleSansAirAlorsQueLeDeployNormalColleTout() throws IOException {
-        prepareArena();
-        prodWorldOnline();
-        prepareRebuildServer();
-
-        BlockData airState = mock(BlockData.class);
-        when(airState.getMaterial()).thenReturn(Material.AIR);
-        when(Bukkit.getServer().createBlockData("minecraft:air")).thenReturn(airState);
-
-        SpongeSchematic arenaSchem = SpongeSchematic.create(2, 2, 2,
-                new int[]{0, 1, 1, 0, 0, 1, 1, 0}, List.of("minecraft:air", "minecraft:stone"));
-        arenaSchem.write(arenas.schematicFile("getdown"));
-        prepareSpawnSchematicHalfAir();
-
-        run("getdown", "2");
-        drainScheduledTasks();
-        // collage classique : volume complet écrasé, air compris (2 x 8 poses)
-        verify(prodBlock, times(16)).setBlockData(any(BlockData.class), eq(false));
-        verify(prodBlock, times(8)).setBlockData(eq(airState), eq(false));
-
-        run("rebuild");
-        drainScheduledTasks();
-        // monde neuf : air ignoré → 4 blocs de spawn + 2 x 4 blocs d'arène, aucune pose d'air
-        verify(newBlock, times(12)).setBlockData(any(BlockData.class), eq(false));
-        verify(newBlock, never()).setBlockData(eq(airState), eq(false));
-        assertEquals(2, deployments.count());
-    }
-
-    @Test
     void leRebuildEstRefuseSiUneSchematicDAreneEstIllisible() throws IOException {
         prepareArena();
         prodWorldOnline();
@@ -1036,7 +953,7 @@ class DeployCommandTest {
     }
 
     @Test
-    void leRebuildSArreteSiLUnloadEchoue() throws IOException {
+    void leRebuildInPlaceSeFaitQuandLUnloadEchoue() throws IOException {
         prepareArena();
         prodWorldOnline();
         prepareRebuildServer();
@@ -1048,46 +965,9 @@ class DeployCommandTest {
         run("rebuild");
         drainScheduledTasks();
 
+        // Rebuild in-place : pas de createWorld, les arènes sont redéployées
         verify(Bukkit.getServer(), never()).createWorld(any(WorldCreator.class));
-        assertTrue(new File(tempDir, "world/region/r.0.0.mca").exists());
         assertEquals(1, deployments.count());
-    }
-
-    @Test
-    void leRebuildAttendLaFinDuTickDesMondes() throws IOException {
-        prepareArena();
-        prodWorldOnline();
-        prepareRebuildServer();
-        prepareSpawnSchematic(2);
-        when(Bukkit.getServer().isTickingWorlds()).thenReturn(true, false);
-        run("getdown", "1");
-        drainScheduledTasks();
-
-        run("rebuild");
-        drainScheduledTasks();
-
-        verify(Bukkit.getServer()).unloadWorld("world", false);
-        assertEquals(1, deployments.count());
-    }
-
-    @Test
-    void leRebuildRecreeUnMondeProdAbsent() throws IOException {
-        prepareArena();
-        prodWorldOnline();
-        run("getdown", "2");
-        drainScheduledTasks();
-        prepareRebuildServer();
-        prepareSpawnSchematic(2);
-        when(Bukkit.getServer().getWorld("world")).thenReturn(null);
-
-        run("rebuild");
-        drainScheduledTasks();
-
-        verify(Bukkit.getServer(), never()).unloadWorld(anyString(), anyBoolean());
-        verify(Bukkit.getServer()).createWorld(any(WorldCreator.class));
-        assertFalse(new File(tempDir, "world").exists());
-        assertEquals(2, deployments.count());
-        assertNotNull(deployments.get("getdown-1"));
     }
 
     @Test

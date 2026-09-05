@@ -5,10 +5,12 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -59,6 +61,7 @@ public class BuildCommand implements TabExecutor {
             case "tp" -> requirePlayer(sender, p -> handleTp(p, rest));
             case "delete" -> requirePlayer(sender, p -> handleDelete(p, rest));
             case "rename" -> requirePlayer(sender, p -> handleRename(p, rest));
+            case "setmode" -> requirePlayer(sender, p -> handleSetMode(p, rest));
             case "goal" -> requirePlayer(sender, this::handleGoal);
             case "help" -> {
                 sendHelp(sender);
@@ -179,7 +182,7 @@ public class BuildCommand implements TabExecutor {
         return true;
     }
 
-    private Location toLocation(org.bukkit.World world, int[] block) {
+    private Location toLocation(World world, int[] block) {
         return new Location(world, block[0] + 0.5, block[1], block[2] + 0.5);
     }
 
@@ -293,11 +296,6 @@ public class BuildCommand implements TabExecutor {
         int sizeZ = maxZ - minZ + 1;
         long volume = (long) sizeX * sizeY * sizeZ;
 
-        if (volume > plugin.getSettings().maxVolume()) {
-            Msg.error(player, "Volume trop grand : " + volume + " blocs (max " + plugin.getSettings().maxVolume() + ").");
-            return true;
-        }
-
         Arena arena = new Arena(session.getSlug());
         arena.setDisplayName(session.getDisplayName());
         arena.setWorld(session.getWorld());
@@ -319,7 +317,7 @@ public class BuildCommand implements TabExecutor {
 
         Msg.info(player, "Capture de <yellow>" + volume + "<gray> blocs (" + sizeX + "x" + sizeY + "x" + sizeZ + ")...");
 
-        org.bukkit.World world = player.getWorld();
+        World world = player.getWorld();
         BlockCapture capture = new BlockCapture(world, minX, minY, minZ, sizeX, sizeY, sizeZ,
                 plugin.getSettings().captureBlocksPerTick(),
                 percent -> Msg.info(player, "Capture : <yellow>" + percent + "%"),
@@ -403,6 +401,12 @@ public class BuildCommand implements TabExecutor {
         Msg.raw(sender, "  <gray>Spawn 2 : <white>" + format(arena.getSpawn2()));
         Msg.raw(sender, "  <gray>Schematic : " + (schematicFile.exists() ? "<green>✔ présente" : "<red>✖ manquante"));
         Msg.raw(sender, "  <gray>Instances déployées : <white>" + instances.size());
+        if (arena.getGameMode() != null) {
+            String modeName = plugin.getSettings().gameModes().get(arena.getGameMode());
+            Msg.raw(sender, "  <gray>Mode de jeu : <white>" + (modeName != null ? modeName : arena.getGameMode()));
+        } else {
+            Msg.raw(sender, "  <gray>Mode de jeu : <yellow>non assigné<dark_gray> (/build setmode " + slug + " <mode>)");
+        }
         Msg.raw(sender, "  <gray>Sauvegardée le : <white>" + new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm")
                 .format(new java.util.Date(arena.getSavedAt())));
         return true;
@@ -425,7 +429,8 @@ public class BuildCommand implements TabExecutor {
         }
         for (Arena arena : arenas) {
             int deployed = plugin.getDeployments().byArena(arena.getSlug()).size();
-            Msg.raw(sender, "  <gray>• <yellow>" + arena.getSlug() + " <dark_gray>(" + arena.getDisplayName() + ")<gray> : "
+            String modeTag = arena.getGameMode() != null ? " <dark_gray>[" + arena.getGameMode() + "]" : "";
+            Msg.raw(sender, "  <gray>• <yellow>" + arena.getSlug() + modeTag + " <dark_gray>(" + arena.getDisplayName() + ")<gray> : "
                     + arena.sizeX() + "x" + arena.sizeY() + "x" + arena.sizeZ()
                     + " <dark_gray>| <gray>déployée x<white>" + deployed);
         }
@@ -526,6 +531,33 @@ public class BuildCommand implements TabExecutor {
         return true;
     }
 
+    private boolean handleSetMode(Player player, List<String> rest) {
+        if (rest.size() < 2) {
+            Msg.error(player, "Usage : /build setmode <arène> <mode>");
+            return true;
+        }
+        String slug = ArenaStorage.slugify(rest.get(0));
+        Arena arena = plugin.getArenas().get(slug);
+        if (arena == null) {
+            Msg.error(player, "Arène introuvable : " + slug);
+            return true;
+        }
+        String modeKey = rest.get(1).toUpperCase(Locale.ROOT);
+        Map<String, String> gameModes = plugin.getSettings().gameModes();
+        if (!gameModes.containsKey(modeKey)) {
+            Msg.error(player, "Mode de jeu inconnu : " + modeKey);
+            Msg.info(player, "Modes disponibles : " + String.join(", ", gameModes.keySet()));
+            return true;
+        }
+        try {
+            plugin.getArenas().setGameMode(slug, modeKey);
+            Msg.ok(player, "Arène <yellow>" + slug + "<green> assignée au mode <yellow>" + gameModes.get(modeKey) + "<green>.");
+        } catch (IOException e) {
+            Msg.error(player, "Erreur lors de la sauvegarde : " + e.getMessage());
+        }
+        return true;
+    }
+
     private boolean handleGoal(Player player) {
         plugin.getGoalGUI().open(player);
         return true;
@@ -552,8 +584,11 @@ public class BuildCommand implements TabExecutor {
             return filter(List.of("addarena", "edit", "setcorner1", "setcorner2", "setspawn1",
                     "setspawn2", "setcenter", "status", "save", "cancel", "info", "list", "tp", "delete", "rename", "goal", "help"), args[0]);
         }
-        if (args.length == 2 && List.of("edit", "info", "tp", "delete", "rename").contains(args[0].toLowerCase(Locale.ROOT))) {
+        if (args.length == 2 && List.of("edit", "info", "tp", "delete", "rename", "setmode").contains(args[0].toLowerCase(Locale.ROOT))) {
             return filter(plugin.getArenas().all().stream().map(Arena::getSlug).toList(), args[1]);
+        }
+        if (args.length == 3 && "setmode".equals(args[0].toLowerCase(Locale.ROOT))) {
+            return filter(new java.util.ArrayList<>(plugin.getSettings().gameModes().keySet()), args[2]);
         }
         return List.of();
     }

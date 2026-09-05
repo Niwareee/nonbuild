@@ -8,6 +8,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import fr.niware.nonbuild.command.BuildCommand;
 import fr.niware.nonbuild.command.DeployCommand;
+import fr.niware.nonbuild.db.DeploymentDb;
+import fr.niware.nonbuild.db.SqlDeploymentDb;
 import fr.niware.nonbuild.edit.SessionListener;
 import fr.niware.nonbuild.edit.SessionManager;
 import fr.niware.nonbuild.gui.GoalGUI;
@@ -18,19 +20,23 @@ import fr.niware.nonbuild.world.VoidChunkGenerator;
 public class NonBuild extends JavaPlugin {
 
     private Settings settings;
+    private DeploymentDb deploymentDb;
     private ArenaStorage arenaStorage;
     private DeploymentStorage deploymentStorage;
     private SessionManager sessionManager;
     private GoalGUI goalGUI;
+    private DeployCommand deployCommand;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
 
         this.settings = new Settings(this);
+        this.deploymentDb = new SqlDeploymentDb(this.settings);
+        this.deploymentDb.initialize();
         this.arenaStorage = new ArenaStorage(this);
         this.arenaStorage.loadAll();
-        this.deploymentStorage = new DeploymentStorage(this);
+        this.deploymentStorage = new DeploymentStorage(this, this.deploymentDb);
         this.deploymentStorage.load();
         this.sessionManager = new SessionManager();
         this.goalGUI = new GoalGUI(this);
@@ -47,9 +53,9 @@ public class NonBuild extends JavaPlugin {
 
         PluginCommand deploy = getCommand("deploy");
         if (deploy != null) {
-            DeployCommand deployCommand = new DeployCommand(this);
-            deploy.setExecutor(deployCommand);
-            deploy.setTabCompleter(deployCommand);
+            this.deployCommand = new DeployCommand(this);
+            deploy.setExecutor(this.deployCommand);
+            deploy.setTabCompleter(this.deployCommand);
         }
 
         getServer().getPluginManager().registerEvents(new SessionListener(this), this);
@@ -91,10 +97,17 @@ public class NonBuild extends JavaPlugin {
     @Override
     public void onDisable() {
         getServer().getScheduler().cancelTasks(this);
+        if (deploymentDb != null) {
+            deploymentDb.close();
+        }
     }
 
     public Settings getSettings() {
         return settings;
+    }
+
+    public DeployCommand getDeployCommand() {
+        return deployCommand;
     }
 
     public ArenaStorage getArenas() {

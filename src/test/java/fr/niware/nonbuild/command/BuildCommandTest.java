@@ -37,6 +37,8 @@ import static org.mockito.Mockito.when;
 
 import fr.niware.nonbuild.NonBuild;
 import fr.niware.nonbuild.Settings;
+import fr.niware.nonbuild.db.DeploymentDb;
+import fr.niware.nonbuild.db.InMemoryDeploymentDb;
 import fr.niware.nonbuild.edit.EditSession;
 import fr.niware.nonbuild.edit.SessionManager;
 import fr.niware.nonbuild.model.Arena;
@@ -59,6 +61,7 @@ class BuildCommandTest {
     private NonBuild plugin;
     private ArenaStorage arenas;
     private DeploymentStorage deployments;
+    private DeploymentDb db;
     private SessionManager sessions;
     private World buildWorld;
     private Chunk buildChunk;
@@ -76,7 +79,9 @@ class BuildCommandTest {
         when(storagePlugin.getDataFolder()).thenReturn(tempDir);
         when(storagePlugin.getLogger()).thenReturn(Logger.getLogger("BuildCommandTest"));
         arenas = new ArenaStorage(storagePlugin);
-        deployments = new DeploymentStorage(storagePlugin);
+        db = new InMemoryDeploymentDb();
+        db.initialize();
+        deployments = new DeploymentStorage(storagePlugin, db);
         sessions = new SessionManager();
 
         JavaPlugin settingsPlugin = mock(JavaPlugin.class);
@@ -289,25 +294,6 @@ class BuildCommandTest {
         run("save");
         assertTrue(sessions.has(player.getUniqueId()));
         assertNull(BukkitServerFixture.pollTimerTask());
-    }
-
-    @Test
-    void saveAvecUnVolumeTropGrandNePlanifiePasDeCapture() {
-        Location huge1 = new Location(buildWorld, 0, -60, 0);
-        Location huge2 = new Location(buildWorld, 300, 100, 300);
-        Location inside = new Location(buildWorld, 5, 60, 5);
-        when(player.getLocation()).thenReturn(huge1, huge2, inside, inside, inside);
-
-        run("addarena", "geante");
-        run("setcorner1");
-        run("setcorner2");
-        run("setspawn1");
-        run("setspawn2");
-        run("setcenter");
-        run("save");
-
-        assertNull(BukkitServerFixture.pollTimerTask());
-        assertTrue(sessions.has(player.getUniqueId()));
     }
 
     @Test
@@ -677,10 +663,11 @@ class BuildCommandTest {
         run("rename", "getdown", "Nouveau");
         assertTrue(arenas.exists("nouveau"));
         assertFalse(arenas.exists("getdown"));
-        // Instance déployée conserve ses coordonnées mais pointe vers le nouveau slug
-        DeployedInstance updated = deployments.get("getdown-1");
+        // Instance déployée conserve ses coordonnées mais pointe vers le nouveau slug ET est renommée
+        DeployedInstance updated = deployments.get("nouveau-1");
         assertNotNull(updated);
         assertEquals("nouveau", updated.getArena());
+        assertEquals("nouveau-1", updated.getName());
         assertArrayEquals(new int[]{90, 60, 90}, updated.getCorner1());
         assertArrayEquals(new int[]{110, 70, 110}, updated.getCorner2());
     }

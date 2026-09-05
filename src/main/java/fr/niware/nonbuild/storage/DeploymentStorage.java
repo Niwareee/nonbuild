@@ -1,7 +1,6 @@
 package fr.niware.nonbuild.storage;
 
-import java.io.File;
-import java.io.IOException;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -9,141 +8,84 @@ import java.util.List;
 import java.util.Map;
 
 import org.bukkit.Bukkit;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import fr.niware.nonbuild.db.DeployedInstanceRow;
+import fr.niware.nonbuild.db.DeploymentDb;
 import fr.niware.nonbuild.model.DeployedInstance;
 import fr.niware.nonbuild.model.Point;
 
-/**
- * Stocke les instances déployées dans deployments.yml.
- * Ce fichier est le contrat lu par le plugin practice : chaque instance expose
- * son monde, son centre, ses coins, ses deux spawns et sa cellule d'emprise.
- * La sauvegarde est faite en async pour ne jamais bloquer le main thread.
- */
 public class DeploymentStorage {
 
     private final JavaPlugin plugin;
+    private final DeploymentDb db;
     private final Map<String, DeployedInstance> instances = new LinkedHashMap<>();
-    private final File file;
 
-    public DeploymentStorage(JavaPlugin plugin) {
+    public DeploymentStorage(JavaPlugin plugin, DeploymentDb db) {
         this.plugin = plugin;
-        this.file = new File(plugin.getDataFolder(), "deployments.yml");
+        this.db = db;
     }
 
     public void load() {
         instances.clear();
-        if (!file.exists()) {
-            return;
-        }
-        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
-        ConfigurationSection root = yaml.getConfigurationSection("instances");
-        if (root == null) {
-            return;
-        }
-        for (String name : root.getKeys(false)) {
-            ConfigurationSection section = root.getConfigurationSection(name);
-            if (section == null) {
-                continue;
-            }
-            DeployedInstance instance = parse(name, section);
-            if (instance != null) {
-                instances.put(name, instance);
-            } else {
-                plugin.getLogger().warning("Instance déployée invalide ignorée : " + name);
-            }
-        }
-    }
-
-    /**
-     * Sauvegarde le registre (écriture atomique).
-     * La sérialisation YAML est faite en async pour ne pas bloquer le main thread.
-     * Retourne un Runnable qui, quand exécuté, attend la fin de l'écriture.
-     * Pour un usage synchrone (deploy séquentiel), appeler le Runnable retourné.
-     * Pour un usage asynchrone (put/remove/clear), ignorer le retour.
-     */
-    public Runnable save() {
-        Map<String, DeployedInstance> snapshot = new LinkedHashMap<>(instances);
-        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            YamlConfiguration yaml = new YamlConfiguration();
-            for (DeployedInstance instance : snapshot.values()) {
-                String path = "instances." + instance.getName();
-                yaml.set(path + ".arena", instance.getArena());
-                yaml.set(path + ".world", instance.getWorld());
-                yaml.set(path + ".deployed-at", instance.getDeployedAt());
-                setPoint(yaml, path + ".center", instance.getCenter());
-                setBlock(yaml, path + ".corner1", instance.getCorner1());
-                setBlock(yaml, path + ".corner2", instance.getCorner2());
-                setPoint(yaml, path + ".spawn1", instance.getSpawn1());
-                setPoint(yaml, path + ".spawn2", instance.getSpawn2());
-                yaml.set(path + ".cell.min-x", instance.getCellMinXZ()[0]);
-                yaml.set(path + ".cell.min-z", instance.getCellMinXZ()[1]);
-                yaml.set(path + ".cell.max-x", instance.getCellMaxXZ()[0]);
-                yaml.set(path + ".cell.max-z", instance.getCellMaxXZ()[1]);
-            }
-            try {
-                YamlFiles.saveAtomic(yaml, file);
-            } catch (IOException e) {
-                plugin.getLogger().severe("Impossible de sauvegarder deployments.yml : " + e.getMessage());
-            }
-            latch.countDown();
-        });
-        return () -> {
-            try {
-                latch.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        };
-    }
-
-    /**
-     * Sauvegarde synchrone (main thread). Utilisée par le pipeline de deploy
-     * qui doit garantir que chaque instance est persistée avant la suivante.
-     */
-    public void saveSync() {
-        YamlConfiguration yaml = new YamlConfiguration();
-        for (DeployedInstance instance : instances.values()) {
-            String path = "instances." + instance.getName();
-            yaml.set(path + ".arena", instance.getArena());
-            yaml.set(path + ".world", instance.getWorld());
-            yaml.set(path + ".deployed-at", instance.getDeployedAt());
-            setPoint(yaml, path + ".center", instance.getCenter());
-            setBlock(yaml, path + ".corner1", instance.getCorner1());
-            setBlock(yaml, path + ".corner2", instance.getCorner2());
-            setPoint(yaml, path + ".spawn1", instance.getSpawn1());
-            setPoint(yaml, path + ".spawn2", instance.getSpawn2());
-            yaml.set(path + ".cell.min-x", instance.getCellMinXZ()[0]);
-            yaml.set(path + ".cell.min-z", instance.getCellMinXZ()[1]);
-            yaml.set(path + ".cell.max-x", instance.getCellMaxXZ()[0]);
-            yaml.set(path + ".cell.max-z", instance.getCellMaxXZ()[1]);
-        }
         try {
-            YamlFiles.saveAtomic(yaml, file);
-        } catch (IOException e) {
-            plugin.getLogger().severe("Impossible de sauvegarder deployments.yml : " + e.getMessage());
+            List<String> order = new ArrayList<>();
+            Map<String, DeployedInstanceRow> rows = db.loadAll(order);
+            for (DeployedInstanceRow row : rows.values()) {
+                DeployedInstance instance = toDeployedInstance(row);
+                if (instance != null) {
+                    instances.put(instance.getName(), instance);
+                }
+            }
+            plugin.getLogger().info("Instances déployées chargées depuis la base : " + instances.size());
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Erreur de chargement des instances : " + e.getMessage());
         }
+    }
+
+    public void save() {
+        try {
+            for (DeployedInstance instance : instances.values()) {
+                DeployedInstanceRow row = toRow(instance);
+                db.save(row);
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Erreur de sauvegarde des instances : " + e.getMessage());
+        }
+    }
+
+    public void saveSync() {
+        save();
     }
 
     public void put(DeployedInstance instance) {
         instances.put(instance.getName(), instance);
-        saveSync();
+        try {
+            db.save(toRow(instance));
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Erreur de sauvegarde de " + instance.getName() + " : " + e.getMessage());
+        }
     }
 
     public boolean remove(String name) {
         if (instances.remove(name) == null) {
             return false;
         }
-        saveSync();
+        try {
+            db.delete(name);
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Erreur de suppression de " + name + " : " + e.getMessage());
+        }
         return true;
     }
 
     public void clear() {
         instances.clear();
-        save();
+        try {
+            db.clear();
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Erreur de suppression de toutes les instances : " + e.getMessage());
+        }
     }
 
     public DeployedInstance get(String name) {
@@ -164,41 +106,38 @@ public class DeploymentStorage {
         return result;
     }
 
-    /**
-     * Retourne les instances dont le slug d'arène correspond (case-insensitive)
-     * à la clé du mode de jeu. Ex: mode "GETDOWN" → arènes "getdown", "getdown-2" etc.
-     */
-    public List<DeployedInstance> byGameMode(String modeKey) {
+    public List<DeployedInstance> byArenaSlugs(java.util.Collection<String> arenaSlugs) {
         List<DeployedInstance> result = new ArrayList<>();
-        String lowerKey = modeKey.toLowerCase(java.util.Locale.ROOT);
+        java.util.Set<String> slugSet = new java.util.HashSet<>(arenaSlugs);
         for (DeployedInstance instance : instances.values()) {
-            if (instance.getArena().toLowerCase(java.util.Locale.ROOT).startsWith(lowerKey)) {
+            if (slugSet.contains(instance.getArena())) {
                 result.add(instance);
             }
         }
         return result;
     }
 
-    /**
-     * Met à jour le slug d'arène de toutes les instances déployées.
-     * Les coordonnées physiques restent inchangées ; seul le champ {@code arena}
-     * dans deployments.yml est mis à jour.
-     */
     public int renameArena(String oldSlug, String newSlug) {
         int updated = 0;
         for (Map.Entry<String, DeployedInstance> entry : new java.util.ArrayList<>(instances.entrySet())) {
             DeployedInstance instance = entry.getValue();
             if (instance.getArena().equals(oldSlug)) {
+                String newName = instance.getName().replaceFirst("^" + oldSlug + "(-|$)", newSlug + "$1");
                 DeployedInstance updatedInstance = new DeployedInstance(
-                        instance.getName(), newSlug, instance.getWorld(), instance.getCenter(),
+                        newName, newSlug, instance.getWorld(), instance.getCenter(),
                         instance.getCorner1(), instance.getCorner2(), instance.getSpawn1(), instance.getSpawn2(),
                         instance.getCellMinXZ(), instance.getCellMaxXZ(), instance.getDeployedAt());
-                instances.put(entry.getKey(), updatedInstance);
+                instances.remove(entry.getKey());
+                instances.put(newName, updatedInstance);
+
+                try {
+                    db.delete(entry.getKey());
+                    db.save(toRow(updatedInstance));
+                } catch (SQLException e) {
+                    plugin.getLogger().severe("Erreur de renommage de " + entry.getKey() + " : " + e.getMessage());
+                }
                 updated++;
             }
-        }
-        if (updated > 0) {
-            saveSync();
         }
         return updated;
     }
@@ -207,9 +146,7 @@ public class DeploymentStorage {
         return instances.size();
     }
 
-    /**
-     * Prochain numéro libre pour nommer une instance "slug-N".
-     */
+
     public int nextIndex(String arenaSlug) {
         int max = 0;
         for (DeployedInstance instance : byArena(arenaSlug)) {
@@ -225,57 +162,50 @@ public class DeploymentStorage {
         return max + 1;
     }
 
-    private void setBlock(YamlConfiguration yaml, String path, int[] block) {
-        yaml.set(path + ".x", block[0]);
-        yaml.set(path + ".y", block[1]);
-        yaml.set(path + ".z", block[2]);
-    }
+    // --- Conversion helpers ---
 
-    private void setPoint(YamlConfiguration yaml, String path, Point point) {
-        yaml.set(path + ".x", point.x());
-        yaml.set(path + ".y", point.y());
-        yaml.set(path + ".z", point.z());
-        yaml.set(path + ".yaw", point.yaw());
-        yaml.set(path + ".pitch", point.pitch());
-    }
+    private static DeployedInstance toDeployedInstance(DeployedInstanceRow row) {
+        Point center = new Point(row.centerX(), row.centerY(), row.centerZ(), row.centerYaw(), row.centerPitch());
 
-    private DeployedInstance parse(String name, ConfigurationSection section) {
-        String arena = section.getString("arena");
-        String world = section.getString("world");
-        Point center = readPoint(section, "center");
-        int[] corner1 = readBlock(section, "corner1");
-        int[] corner2 = readBlock(section, "corner2");
-        Point spawn1 = readPoint(section, "spawn1");
-        Point spawn2 = readPoint(section, "spawn2");
-        ConfigurationSection cell = section.getConfigurationSection("cell");
-        if (arena == null || world == null || center == null || corner1 == null || corner2 == null
-                || spawn1 == null || spawn2 == null || cell == null) {
+        int[] corner1 = row.corner1X() != null ?
+                new int[]{row.corner1X(), row.corner1Y(), row.corner1Z()} : null;
+        int[] corner2 = row.corner2X() != null ?
+                new int[]{row.corner2X(), row.corner2Y(), row.corner2Z()} : null;
+
+        Point spawn1 = row.spawn1X() != null ?
+                new Point(row.spawn1X(), row.spawn1Y(), row.spawn1Z(), row.spawn1Yaw(), row.spawn1Pitch()) : null;
+        Point spawn2 = row.spawn2X() != null ?
+                new Point(row.spawn2X(), row.spawn2Y(), row.spawn2Z(), row.spawn2Yaw(), row.spawn2Pitch()) : null;
+
+        int[] cellMin = row.cellMinX() != null ?
+                new int[]{row.cellMinX(), row.cellMinZ()} : null;
+        int[] cellMax = row.cellMaxX() != null ?
+                new int[]{row.cellMaxX(), row.cellMaxZ()} : null;
+
+        if (corner1 == null || corner2 == null || spawn1 == null || spawn2 == null || cellMin == null || cellMax == null) {
             return null;
         }
-        int[] cellMin = {cell.getInt("min-x"), cell.getInt("min-z")};
-        int[] cellMax = {cell.getInt("max-x"), cell.getInt("max-z")};
-        return new DeployedInstance(name, arena, world, center, corner1, corner2,
-                spawn1, spawn2, cellMin, cellMax, section.getLong("deployed-at"));
+
+        return new DeployedInstance(
+                row.instanceName(), row.arena(), row.world(),
+                center, corner1, corner2, spawn1, spawn2,
+                cellMin, cellMax, row.deployedAt());
     }
 
-    private int[] readBlock(ConfigurationSection section, String path) {
-        ConfigurationSection sub = section.getConfigurationSection(path);
-        if (sub == null) {
-            return null;
-        }
-        return new int[]{sub.getInt("x"), sub.getInt("y"), sub.getInt("z")};
-    }
-
-    private Point readPoint(ConfigurationSection section, String path) {
-        ConfigurationSection sub = section.getConfigurationSection(path);
-        if (sub == null) {
-            return null;
-        }
-        return new Point(
-                sub.getDouble("x"),
-                sub.getDouble("y"),
-                sub.getDouble("z"),
-                (float) sub.getDouble("yaw"),
-                (float) sub.getDouble("pitch"));
+    private static DeployedInstanceRow toRow(DeployedInstance inst) {
+        return new DeployedInstanceRow(
+                inst.getName(), inst.getArena(), inst.getWorld(),
+                inst.getCenter().x(), inst.getCenter().y(), inst.getCenter().z(),
+                inst.getCenter().yaw(), inst.getCenter().pitch(),
+                inst.getCorner1()[0], inst.getCorner1()[1], inst.getCorner1()[2],
+                inst.getCorner2()[0], inst.getCorner2()[1], inst.getCorner2()[2],
+                inst.getSpawn1().x(), inst.getSpawn1().y(), inst.getSpawn1().z(),
+                inst.getSpawn1().yaw(), inst.getSpawn1().pitch(),
+                inst.getSpawn2().x(), inst.getSpawn2().y(), inst.getSpawn2().z(),
+                inst.getSpawn2().yaw(), inst.getSpawn2().pitch(),
+                inst.getCellMinXZ()[0], inst.getCellMinXZ()[1],
+                inst.getCellMaxXZ()[0], inst.getCellMaxXZ()[1],
+                inst.getDeployedAt()
+        );
     }
 }

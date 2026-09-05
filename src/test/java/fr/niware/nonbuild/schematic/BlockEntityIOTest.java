@@ -1,13 +1,11 @@
 package fr.niware.nonbuild.schematic;
 
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-import org.bukkit.Bukkit;
 import org.bukkit.DyeColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -42,9 +40,9 @@ import org.junit.jupiter.api.Test;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.MockedStatic;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -52,10 +50,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.destroystokyo.paper.profile.PlayerProfile;
 import com.destroystokyo.paper.profile.ProfileProperty;
 
 import fr.niware.nonbuild.testutil.BukkitServerFixture;
+import io.papermc.paper.datacomponent.item.ResolvableProfile;
 import net.kyori.adventure.text.Component;
 
 /**
@@ -89,6 +87,7 @@ class BlockEntityIOTest {
     }
 
     @Test
+    @SuppressWarnings("deprecation") // Sign.getColor()/setColor() : pas d'alternative non-dépréciée
     void captureUnePancarteMuraleProduitLesDeuxFaces() {
         SignSide front = mock(SignSide.class);
         when(front.lines()).thenReturn(List.of(
@@ -123,12 +122,12 @@ class BlockEntityIOTest {
 
     @Test
     void captureUnCraneCustomProduitLeProfil() {
-        PlayerProfile profile = mock(PlayerProfile.class);
-        when(profile.getName()).thenReturn("Steve");
-        when(profile.getProperties()).thenReturn(Set.of(new ProfileProperty("textures", "valeur", "signature")));
+        ResolvableProfile profile = mock(ResolvableProfile.class);
+        when(profile.name()).thenReturn("Steve");
+        when(profile.properties()).thenReturn(Set.of(new ProfileProperty("textures", "valeur", "signature")));
 
         Skull skull = mock(Skull.class);
-        when(skull.getPlayerProfile()).thenReturn(profile);
+        when(skull.getProfile()).thenReturn(profile);
 
         Map<String, Object> entry = BlockEntityIO.capture(skull, 0, 1, 0);
         assertEquals("minecraft:skull", entry.get("Id"));
@@ -144,23 +143,24 @@ class BlockEntityIOTest {
     @Test
     void captureUnCraneSansProfilRetourneNull() {
         Skull skull = mock(Skull.class);
-        when(skull.getPlayerProfile()).thenReturn(null);
+        when(skull.getProfile()).thenReturn(null);
         assertNull(BlockEntityIO.capture(skull, 0, 0, 0));
 
-        PlayerProfile emptyProfile = mock(PlayerProfile.class);
-        when(emptyProfile.getProperties()).thenReturn(Set.of());
-        when(skull.getPlayerProfile()).thenReturn(emptyProfile);
+        ResolvableProfile emptyProfile = mock(ResolvableProfile.class);
+        when(emptyProfile.name()).thenReturn(null);
+        when(emptyProfile.properties()).thenReturn(Set.of());
+        when(skull.getProfile()).thenReturn(emptyProfile);
         assertNull(BlockEntityIO.capture(skull, 0, 0, 0));
     }
 
     @Test
     void captureUnCraneAvecNomSeulConserveLeProfilNonResolu() {
-        PlayerProfile profile = mock(PlayerProfile.class);
-        when(profile.getName()).thenReturn("Notch");
-        when(profile.getProperties()).thenReturn(Set.of());
+        ResolvableProfile profile = mock(ResolvableProfile.class);
+        when(profile.name()).thenReturn("Notch");
+        when(profile.properties()).thenReturn(Set.of());
 
         Skull skull = mock(Skull.class);
-        when(skull.getPlayerProfile()).thenReturn(profile);
+        when(skull.getProfile()).thenReturn(profile);
 
         Map<String, Object> entry = BlockEntityIO.capture(skull, 0, 0, 0);
         assertEquals("minecraft:skull", entry.get("Id"));
@@ -256,6 +256,7 @@ class BlockEntityIOTest {
     }
 
     @Test
+    @SuppressWarnings("deprecation") // Sign.setColor() : pas d'alternative non-dépréciée
     void appliqueUnePancarteSurLeBlocColle() {
         World world = mock(World.class);
         Block block = mock(Block.class);
@@ -294,29 +295,35 @@ class BlockEntityIOTest {
         when(world.getBlockAt(anyInt(), anyInt(), anyInt())).thenReturn(block);
         when(block.getState()).thenReturn(skull);
 
-        PlayerProfile created = profileMockWithRealProperties();
-        when(Bukkit.getServer().createProfile(any(UUID.class), eq("Steve"))).thenReturn(created);
+        ResolvableProfile.Builder builder = mock(ResolvableProfile.Builder.class);
+        ResolvableProfile builtProfile = mock(ResolvableProfile.class);
+        when(builtProfile.properties()).thenReturn(Set.of(new ProfileProperty("textures", "valeur", "sig")));
+        when(builtProfile.name()).thenReturn("Steve");
+        when(builder.name(anyString())).thenReturn(builder);
+        when(builder.uuid(any(UUID.class))).thenReturn(builder);
+        when(builder.addProperty(any(ProfileProperty.class))).thenReturn(builder);
+        when(builder.build()).thenReturn(builtProfile);
 
-        Map<String, Object> property = new LinkedHashMap<>();
-        property.put("name", "textures");
-        property.put("value", "valeur");
-        property.put("signature", "sig");
-        Map<String, Object> profileMap = new LinkedHashMap<>();
-        profileMap.put("name", "Steve");
-        profileMap.put("properties", List.of(property));
-        Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("Id", "minecraft:skull");
-        entry.put("Pos", List.of(0, 0, 0));
-        entry.put("profile", profileMap);
+        try (MockedStatic<ResolvableProfile> rs = mockStatic(ResolvableProfile.class)) {
+            rs.when(ResolvableProfile::resolvableProfile).thenReturn(builder);
 
-        BlockEntityIO.apply(world, 5, 64, 5, entry);
+            Map<String, Object> property = new LinkedHashMap<>();
+            property.put("name", "textures");
+            property.put("value", "valeur");
+            property.put("signature", "sig");
+            Map<String, Object> profileMap = new LinkedHashMap<>();
+            profileMap.put("name", "Steve");
+            profileMap.put("properties", List.of(property));
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("Id", "minecraft:skull");
+            entry.put("Pos", List.of(0, 0, 0));
+            entry.put("profile", profileMap);
 
-        verify(skull).setPlayerProfile(created);
-        verify(skull).update(true, false);
-        ProfileProperty applied = ((Set<ProfileProperty>) created.getProperties()).iterator().next();
-        assertEquals("textures", applied.getName());
-        assertEquals("valeur", applied.getValue());
-        assertEquals("sig", applied.getSignature());
+            BlockEntityIO.apply(world, 5, 64, 5, entry);
+
+            verify(skull).setProfile(builtProfile);
+            verify(skull).update(true, false);
+        }
     }
 
     @Test
@@ -327,27 +334,33 @@ class BlockEntityIOTest {
         when(world.getBlockAt(anyInt(), anyInt(), anyInt())).thenReturn(block);
         when(block.getState()).thenReturn(skull);
 
-        PlayerProfile created = profileMockWithRealProperties();
-        when(Bukkit.getServer().createProfile(any(UUID.class))).thenReturn(created);
+        ResolvableProfile.Builder builder = mock(ResolvableProfile.Builder.class);
+        ResolvableProfile builtProfile = mock(ResolvableProfile.class);
+        when(builtProfile.properties()).thenReturn(Set.of(new ProfileProperty("textures", "valeur2", null)));
+        when(builder.name(any())).thenReturn(builder);
+        when(builder.uuid(any(UUID.class))).thenReturn(builder);
+        when(builder.addProperty(any(ProfileProperty.class))).thenReturn(builder);
+        when(builder.build()).thenReturn(builtProfile);
 
-        Map<String, Object> texture = new LinkedHashMap<>();
-        texture.put("Value", "valeur2");
-        texture.put("Signature", "sig2");
-        Map<String, Object> legacyProperties = new LinkedHashMap<>();
-        legacyProperties.put("textures", List.of(texture));
-        Map<String, Object> skullOwner = new LinkedHashMap<>();
-        skullOwner.put("Properties", legacyProperties);
-        Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("Id", "minecraft:skull");
-        entry.put("Pos", List.of(0, 0, 0));
-        entry.put("SkullOwner", skullOwner);
+        try (MockedStatic<ResolvableProfile> rs = mockStatic(ResolvableProfile.class)) {
+            rs.when(ResolvableProfile::resolvableProfile).thenReturn(builder);
 
-        BlockEntityIO.apply(world, 0, 64, 0, entry);
+            Map<String, Object> texture = new LinkedHashMap<>();
+            texture.put("Value", "valeur2");
+            texture.put("Signature", "sig2");
+            Map<String, Object> legacyProperties = new LinkedHashMap<>();
+            legacyProperties.put("textures", List.of(texture));
+            Map<String, Object> skullOwner = new LinkedHashMap<>();
+            skullOwner.put("Properties", legacyProperties);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("Id", "minecraft:skull");
+            entry.put("Pos", List.of(0, 0, 0));
+            entry.put("SkullOwner", skullOwner);
 
-        verify(skull).setPlayerProfile(created);
-        ProfileProperty applied = ((Set<ProfileProperty>) created.getProperties()).iterator().next();
-        assertEquals("textures", applied.getName());
-        assertEquals("valeur2", applied.getValue());
+            BlockEntityIO.apply(world, 0, 64, 0, entry);
+
+            verify(skull).setProfile(builtProfile);
+        }
     }
 
     @Test
@@ -482,18 +495,6 @@ class BlockEntityIOTest {
         entry.put("Pos", List.of(0, 0, 0));
 
         BlockEntityIO.apply(world, 0, 64, 0, entry); // ne doit pas lever
-    }
-
-    /** Profil mocké mais avec un vrai Set de propriétés (setProperty/getProperties cohérents). */
-    private PlayerProfile profileMockWithRealProperties() {
-        PlayerProfile created = mock(PlayerProfile.class);
-        Set<ProfileProperty> properties = new HashSet<>();
-        doAnswer(inv -> {
-            properties.add(inv.getArgument(0));
-            return null;
-        }).when(created).setProperty(any(ProfileProperty.class));
-        when(created.getProperties()).thenAnswer(inv -> properties);
-        return created;
     }
 
     // === Entity capture tests (ItemFrame / Painting) ===

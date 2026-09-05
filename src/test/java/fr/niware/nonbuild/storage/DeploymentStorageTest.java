@@ -1,37 +1,34 @@
 package fr.niware.nonbuild.storage;
 
-import fr.niware.nonbuild.model.DeployedInstance;
-import fr.niware.nonbuild.model.Point;
-import org.bukkit.plugin.java.JavaPlugin;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.logging.Logger;
 
+import org.bukkit.plugin.java.JavaPlugin;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import fr.niware.nonbuild.db.DeploymentDb;
+import fr.niware.nonbuild.db.InMemoryDeploymentDb;
+import fr.niware.nonbuild.model.DeployedInstance;
+import fr.niware.nonbuild.model.Point;
+
 class DeploymentStorageTest {
 
-    @TempDir
-    File tempDir;
-
     private JavaPlugin plugin;
+    private DeploymentDb db;
 
     @BeforeEach
     void setup() {
         plugin = mock(JavaPlugin.class);
-        when(plugin.getDataFolder()).thenReturn(tempDir);
         when(plugin.getLogger()).thenReturn(Logger.getLogger("DeploymentStorageTest"));
+        db = new InMemoryDeploymentDb();
+        db.initialize();
     }
 
     private DeployedInstance instance(String name, String arenaSlug) {
@@ -48,13 +45,13 @@ class DeploymentStorageTest {
 
     @Test
     void sauvegardePuisRechargementConserveLesInstances() {
-        DeploymentStorage storage = new DeploymentStorage(plugin);
+        DeploymentStorage storage = new DeploymentStorage(plugin, db);
         storage.put(instance("getdown-1", "getdown"));
         storage.put(instance("getdown-2", "getdown"));
         storage.put(instance("yacht-1", "yacht"));
         assertEquals(3, storage.count());
 
-        DeploymentStorage fresh = new DeploymentStorage(plugin);
+        DeploymentStorage fresh = new DeploymentStorage(plugin, db);
         fresh.load();
         assertEquals(3, fresh.count());
 
@@ -78,19 +75,19 @@ class DeploymentStorageTest {
 
     @Test
     void removeSupprimeEtPersiste() {
-        DeploymentStorage storage = new DeploymentStorage(plugin);
+        DeploymentStorage storage = new DeploymentStorage(plugin, db);
         storage.put(instance("getdown-1", "getdown"));
         assertTrue(storage.remove("getdown-1"));
         assertFalse(storage.remove("getdown-1"));
 
-        DeploymentStorage fresh = new DeploymentStorage(plugin);
+        DeploymentStorage fresh = new DeploymentStorage(plugin, db);
         fresh.load();
         assertEquals(0, fresh.count());
     }
 
     @Test
     void nextIndexDonneLeProchainNumeroLibre() {
-        DeploymentStorage storage = new DeploymentStorage(plugin);
+        DeploymentStorage storage = new DeploymentStorage(plugin, db);
         assertEquals(1, storage.nextIndex("getdown"));
 
         storage.put(instance("getdown-1", "getdown"));
@@ -102,56 +99,14 @@ class DeploymentStorageTest {
 
     @Test
     void loadSansFichierDonneZeroInstance() {
-        DeploymentStorage fresh = new DeploymentStorage(plugin);
+        DeploymentStorage fresh = new DeploymentStorage(plugin, db);
         fresh.load();
         assertEquals(0, fresh.count());
-    }
-
-    @Test
-    void loadIgnoreLesEntreesScalairesEtInvalides() throws IOException {
-        File file = new File(tempDir, "deployments.yml");
-        Files.writeString(file.toPath(), """
-                instances:
-                  scalaire: "pas une section"
-                  invalide:
-                    arena: getdown
-                    world: world
-                """);
-
-        DeploymentStorage fresh = new DeploymentStorage(plugin);
-        fresh.load();
-        assertEquals(0, fresh.count());
-    }
-
-    @Test
-    void laSauvegardeEstAtomiqueEtNeLaissePasDeFichierTemporaire() {
-        DeploymentStorage storage = new DeploymentStorage(plugin);
-        storage.put(instance("getdown-1", "getdown"));
-
-        assertTrue(new File(tempDir, "deployments.yml").exists());
-        assertFalse(new File(tempDir, "deployments.yml.tmp").exists());
-
-        DeploymentStorage fresh = new DeploymentStorage(plugin);
-        fresh.load();
-        assertEquals(1, fresh.count());
-    }
-
-    @Test
-    void uneErreurDEcritureEstLoggeeSansException() {
-        // L'écriture passe par un .tmp puis rename : c'est le dossier qui doit être inaccessible.
-        assertTrue(tempDir.setWritable(false));
-        try {
-            DeploymentStorage storage = new DeploymentStorage(plugin);
-            storage.put(instance("getdown-1", "getdown"));
-            assertEquals(1, storage.count()); // l'état mémoire reste cohérent
-        } finally {
-            tempDir.setWritable(true);
-        }
     }
 
     @Test
     void nextIndexIgnoreLesNomsSansSuffixeNumerique() {
-        DeploymentStorage storage = new DeploymentStorage(plugin);
+        DeploymentStorage storage = new DeploymentStorage(plugin, db);
         storage.put(instance("getdown", "getdown")); // pas de tiret
         assertEquals(1, storage.nextIndex("getdown"));
         storage.put(instance("getdown-2", "getdown"));

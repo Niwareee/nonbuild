@@ -19,18 +19,22 @@ placement:
 
 pasting:
   # Blocs collés par tick lors d'un déploiement.
-  blocks-per-tick: 20000
+  blocks-per-tick: 50000
   # Blocs capturés par tick lors d'une sauvegarde d'arène.
   capture-blocks-per-tick: 50000
-
-limits:
-  # Volume maximal d'une arène en blocs (largeur x hauteur x profondeur).
-  max-volume: 4000000
 
 edit:
   # Passe le joueur en mode creative à l'ouverture d'une session d'édition,
   # et restaure son mode précédent à la fin (save/cancel).
   set-creative: true
+
+database:
+  host: '192.168.1.11'
+  port: 3306
+  name: 'nontia'
+  user: 'nontia'
+  password: '9g00LBCiN0dMKsVjcZtXLTuO0aeTn8TL'
+  pool-size: 4
 
 game-modes:
   PVPROLLS: 'PvPRolls'

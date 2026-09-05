@@ -51,6 +51,9 @@ public class ArenaStorage {
         yaml.set("slug", arena.getSlug());
         yaml.set("display-name", arena.getDisplayName());
         yaml.set("world", arena.getWorld());
+        if (arena.getGameMode() != null) {
+            yaml.set("game-mode", arena.getGameMode());
+        }
         yaml.set("saved-at", arena.getSavedAt());
         setBlock(yaml, "corner1", arena.getCorner1());
         setBlock(yaml, "corner2", arena.getCorner2());
@@ -128,6 +131,7 @@ public class ArenaStorage {
         Arena renamed = new Arena(newSlug);
         renamed.setDisplayName(newDisplayName);
         renamed.setWorld(old.getWorld());
+        renamed.setGameMode(old.getGameMode());
         renamed.setCorner1(old.getCorner1());
         renamed.setCorner2(old.getCorner2());
         renamed.setCenter(old.getCenter());
@@ -150,6 +154,32 @@ public class ArenaStorage {
 
     public Collection<Arena> all() {
         return arenas.values();
+    }
+
+    /**
+     * Retourne les slugs des arènes assignées au mode de jeu donné.
+     */
+    public java.util.Collection<String> byGameMode(String gameMode) {
+        java.util.List<String> result = new java.util.ArrayList<>();
+        for (Arena arena : arenas.values()) {
+            if (gameMode.equals(arena.getGameMode())) {
+                result.add(arena.getSlug());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Met à jour le mode de jeu d'une arène et sauvegarde le YAML.
+     */
+    public boolean setGameMode(String slug, String gameMode) throws IOException {
+        Arena arena = arenas.get(slug);
+        if (arena == null) {
+            return false;
+        }
+        arena.setGameMode(gameMode);
+        save(arena);
+        return true;
     }
 
     public int count() {
@@ -186,6 +216,7 @@ public class ArenaStorage {
         Arena arena = new Arena(slug);
         arena.setDisplayName(yaml.getString("display-name", slug));
         arena.setWorld(yaml.getString("world"));
+        arena.setGameMode(yaml.getString("game-mode"));
         arena.setSavedAt(yaml.getLong("saved-at"));
         arena.setCorner1(readBlock(yaml, "corner1"));
         arena.setCorner2(readBlock(yaml, "corner2"));

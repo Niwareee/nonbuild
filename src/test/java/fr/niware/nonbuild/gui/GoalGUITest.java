@@ -3,6 +3,7 @@ package fr.niware.nonbuild.gui;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -15,7 +16,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.Mock;
@@ -67,13 +67,13 @@ class GoalGUITest {
         );
         when(settings.gameModes()).thenReturn(gameModes);
 
-        when(Bukkit.createInventory(any(), eq(54), anyString())).thenReturn(mockInventory);
+        when(Bukkit.createInventory(any(), eq(54), any(Component.class))).thenReturn(mockInventory);
         when(mockInventory.getSize()).thenReturn(54);
 
         gui = new GoalGUI(plugin);
         gui.itemFactory = mat -> mockItemStack;
         when(mockItemStack.getItemMeta()).thenReturn(mockItemMeta);
-        when(mockItemMeta.getLore()).thenReturn(List.of());
+        when(mockItemMeta.lore()).thenReturn(List.of());
     }
 
     @Test
@@ -92,30 +92,34 @@ class GoalGUITest {
 
         gui.open(player);
 
-        verify(mockItemMeta, atLeast(1)).setLore(argThat(lore ->
-                lore.stream().anyMatch(l -> l.contains("Aucune map déployée"))));
+        verify(mockItemMeta, atLeast(1)).lore(argThat(lore ->
+                lore.stream().anyMatch(l -> l.toString().contains("Aucune map déployée"))));
     }
 
     @Test
     void modeAvecInstanceAfficheLoreArenesDeployees() {
         DeployedInstance inst = mockInstance("getdown", "getdown-1");
-        when(deployments.byGameMode("GETDOWN")).thenReturn(List.of(inst));
-        when(deployments.byGameMode("SKYWARS")).thenReturn(List.of());
-        when(deployments.byGameMode("FFA")).thenReturn(List.of());
+        when(arenas.byGameMode("GETDOWN")).thenReturn(Set.of("getdown"));
+        when(deployments.byArenaSlugs(Set.of("getdown"))).thenReturn(List.of(inst));
+        when(arenas.byGameMode("SKYWARS")).thenReturn(Set.of());
+        when(deployments.byArenaSlugs(Set.of())).thenReturn(List.of());
+        when(arenas.byGameMode("FFA")).thenReturn(Set.of());
         when(arenas.get("getdown")).thenReturn(null);
 
         gui.open(player);
 
-        verify(mockItemMeta, atLeast(1)).setLore(argThat(lore ->
-                lore.stream().anyMatch(l -> l.contains("Arènes déployées"))));
+        verify(mockItemMeta, atLeast(1)).lore(argThat(lore ->
+                lore.stream().anyMatch(l -> l.toString().contains("Arènes déployées"))));
     }
 
     @Test
     void loreAfficheNomAfficheDeLAreneSiDisponible() {
         DeployedInstance inst = mockInstance("getdown", "getdown-1");
-        when(deployments.byGameMode("GETDOWN")).thenReturn(List.of(inst));
-        when(deployments.byGameMode("SKYWARS")).thenReturn(List.of());
-        when(deployments.byGameMode("FFA")).thenReturn(List.of());
+        when(arenas.byGameMode("GETDOWN")).thenReturn(Set.of("getdown"));
+        when(deployments.byArenaSlugs(Set.of("getdown"))).thenReturn(List.of(inst));
+        when(arenas.byGameMode("SKYWARS")).thenReturn(Set.of());
+        when(deployments.byArenaSlugs(Set.of())).thenReturn(List.of());
+        when(arenas.byGameMode("FFA")).thenReturn(Set.of());
 
         fr.niware.nonbuild.model.Arena arena = mock(fr.niware.nonbuild.model.Arena.class);
         when(arena.getDisplayName()).thenReturn("GetDown Arena");
@@ -123,37 +127,41 @@ class GoalGUITest {
 
         gui.open(player);
 
-        verify(mockItemMeta, atLeast(1)).setLore(argThat(lore ->
-                lore.stream().anyMatch(l -> l.contains("GetDown Arena"))));
+        verify(mockItemMeta, atLeast(1)).lore(argThat(lore ->
+                lore.stream().anyMatch(l -> l.toString().contains("GetDown Arena"))));
     }
 
     @Test
     void loreAfficheCompteurParArene() {
         DeployedInstance inst1 = mockInstance("getdown", "getdown-1");
         DeployedInstance inst2 = mockInstance("getdown", "getdown-2");
-        when(deployments.byGameMode("GETDOWN")).thenReturn(List.of(inst1, inst2));
-        when(deployments.byGameMode("SKYWARS")).thenReturn(List.of());
-        when(deployments.byGameMode("FFA")).thenReturn(List.of());
+        when(arenas.byGameMode("GETDOWN")).thenReturn(Set.of("getdown"));
+        when(deployments.byArenaSlugs(Set.of("getdown"))).thenReturn(List.of(inst1, inst2));
+        when(arenas.byGameMode("SKYWARS")).thenReturn(Set.of());
+        when(deployments.byArenaSlugs(Set.of())).thenReturn(List.of());
+        when(arenas.byGameMode("FFA")).thenReturn(Set.of());
         when(arenas.get("getdown")).thenReturn(null);
 
         gui.open(player);
 
-        verify(mockItemMeta, atLeast(1)).setLore(argThat(lore ->
-                lore.stream().anyMatch(l -> l.contains("2 instances"))));
+        verify(mockItemMeta, atLeast(1)).lore(argThat(lore ->
+                lore.stream().anyMatch(l -> l.toString().contains("2 instances"))));
     }
 
     @Test
     void loreAfficheCompteurSingular() {
         DeployedInstance inst = mockInstance("getdown", "getdown-1");
-        when(deployments.byGameMode("GETDOWN")).thenReturn(List.of(inst));
-        when(deployments.byGameMode("SKYWARS")).thenReturn(List.of());
-        when(deployments.byGameMode("FFA")).thenReturn(List.of());
+        when(arenas.byGameMode("GETDOWN")).thenReturn(Set.of("getdown"));
+        when(deployments.byArenaSlugs(Set.of("getdown"))).thenReturn(List.of(inst));
+        when(arenas.byGameMode("SKYWARS")).thenReturn(Set.of());
+        when(deployments.byArenaSlugs(Set.of())).thenReturn(List.of());
+        when(arenas.byGameMode("FFA")).thenReturn(Set.of());
         when(arenas.get("getdown")).thenReturn(null);
 
         gui.open(player);
 
-        verify(mockItemMeta, atLeast(1)).setLore(argThat(lore ->
-                lore.stream().anyMatch(l -> l.contains("1 instance") && !l.contains("instances"))));
+        verify(mockItemMeta, atLeast(1)).lore(argThat(lore ->
+                lore.stream().anyMatch(l -> l.toString().contains("1 instance") && !l.toString().contains("instances"))));
     }
 
     @Test
@@ -188,13 +196,14 @@ class GoalGUITest {
 
         gui.open(player);
 
-        verify(mockItemMeta, atLeast(1)).setDisplayName(argThat(name -> name.contains("§e")));
+        verify(mockItemMeta, atLeast(1)).displayName(argThat(name -> name.toString().contains("§e")));
     }
 
     private void stubDeploymentsEmpty() {
-        when(deployments.byGameMode("GETDOWN")).thenReturn(List.of());
-        when(deployments.byGameMode("SKYWARS")).thenReturn(List.of());
-        when(deployments.byGameMode("FFA")).thenReturn(List.of());
+        when(arenas.byGameMode("GETDOWN")).thenReturn(Set.of());
+        when(arenas.byGameMode("SKYWARS")).thenReturn(Set.of());
+        when(arenas.byGameMode("FFA")).thenReturn(Set.of());
+        when(deployments.byArenaSlugs(Set.of())).thenReturn(List.of());
     }
 
     private DeployedInstance mockInstance(String arena, String name) {

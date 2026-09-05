@@ -5,6 +5,8 @@ public class Arena {
     private final String slug;
     private String displayName;
     private String world;
+    /** Mode de jeu assigné (ex. "GETDOWN"). Nullable si non encore assigné. */
+    private String gameMode;
     private int[] corner1;
     private int[] corner2;
     private Point center;
@@ -82,6 +84,14 @@ public class Arena {
 
     public void setSavedAt(long savedAt) {
         this.savedAt = savedAt;
+    }
+
+    public String getGameMode() {
+        return gameMode;
+    }
+
+    public void setGameMode(String gameMode) {
+        this.gameMode = gameMode;
     }
 
     public int minX() {

@@ -10,15 +10,16 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.bukkit.Art;
-import org.bukkit.Bukkit;
 import org.bukkit.DyeColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Rotation;
 import org.bukkit.World;
 import org.bukkit.block.Banner;
 import org.bukkit.block.Barrel;
 import org.bukkit.block.BlastFurnace;
+import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.BrewingStand;
@@ -50,9 +51,9 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.material.Attachable;
 
-import com.destroystokyo.paper.profile.PlayerProfile;
 import com.destroystokyo.paper.profile.ProfileProperty;
 
+import io.papermc.paper.datacomponent.item.ResolvableProfile;
 import io.papermc.paper.registry.RegistryAccess;
 import io.papermc.paper.registry.RegistryKey;
 import net.kyori.adventure.text.Component;
@@ -146,6 +147,7 @@ public final class BlockEntityIO {
         return entry;
     }
 
+    @SuppressWarnings("deprecation") // Sign.getColor()/setColor() : pas d'alternative non-dépréciée sur SignSide
     private static Map<String, Object> captureSign(Sign sign) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("front_text", captureSide(sign.getSide(Side.FRONT)));
@@ -166,16 +168,13 @@ public final class BlockEntityIO {
     }
 
     private static Map<String, Object> captureSkull(Skull skull) {
-        PlayerProfile profile = skull.getPlayerProfile();
+        ResolvableProfile profile = skull.getProfile();
         if (profile == null) {
             return null;
         }
-        String name = profile.getName();
+        String name = profile.name();
         boolean hasName = name != null && !name.isBlank();
-        // Un profil non résolu par le serveur (nom sans propriété textures) reste
-        // sauvegardable : applySkull recrée le profil depuis le nom seul et le
-        // serveur y résout la skin au collage.
-        if (!hasName && profile.getProperties().isEmpty()) {
+        if (!hasName && profile.properties().isEmpty()) {
             return null;
         }
         Map<String, Object> serialized = new LinkedHashMap<>();
@@ -183,7 +182,7 @@ public final class BlockEntityIO {
             serialized.put("name", name);
         }
         List<Object> properties = new ArrayList<>();
-        for (ProfileProperty property : profile.getProperties()) {
+        for (ProfileProperty property : profile.properties()) {
             Map<String, Object> propertyMap = new LinkedHashMap<>();
             propertyMap.put("name", property.getName());
             propertyMap.put("value", property.getValue());
@@ -345,6 +344,7 @@ public final class BlockEntityIO {
         }
     }
 
+    @SuppressWarnings("deprecation") // Sign.setColor() : pas d'alternative non-dépréciée sur SignSide
     private static void applySign(Sign sign, Map<String, Object> entry) {
         applySide(sign.getSide(Side.FRONT), entry.get("front_text"));
         applySide(sign.getSide(Side.BACK), entry.get("back_text"));
@@ -389,17 +389,18 @@ public final class BlockEntityIO {
             return;
         }
         String name = profileMap.get("name") instanceof String n && !n.isBlank() ? n : null;
-        PlayerProfile profile = name != null
-                ? Bukkit.createProfile(UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes()), name)
-                : Bukkit.createProfile(UUID.randomUUID());
-        addModernProperties(profile, profileMap.get("properties"));
-        addLegacyTextures(profile, profileMap.get("Properties"));
-        if (!profile.getProperties().isEmpty()) {
-            skull.setPlayerProfile(profile);
+        ResolvableProfile.Builder builder = ResolvableProfile.resolvableProfile()
+                .uuid(name != null ? UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes()) : UUID.randomUUID())
+                .name(name);
+        collectModernProperties(builder, profileMap.get("properties"));
+        collectLegacyTextures(builder, profileMap.get("Properties"));
+        ResolvableProfile profile = builder.build();
+        if (!profile.properties().isEmpty()) {
+            skull.setProfile(profile);
         }
     }
 
-    private static void addModernProperties(PlayerProfile profile, Object raw) {
+    private static void collectModernProperties(ResolvableProfile.Builder builder, Object raw) {
         if (!(raw instanceof List<?> properties)) {
             return;
         }
@@ -408,20 +409,20 @@ public final class BlockEntityIO {
                     && map.get("name") instanceof String propertyName
                     && map.get("value") instanceof String value) {
                 String signature = map.get("signature") instanceof String s ? s : null;
-                profile.setProperty(new ProfileProperty(propertyName, value, signature));
+                builder.addProperty(new ProfileProperty(propertyName, value, signature));
             }
         }
     }
 
     /** Format WorldEdit pré-1.20.5 : SkullOwner.Properties.textures. */
-    private static void addLegacyTextures(PlayerProfile profile, Object raw) {
+    private static void collectLegacyTextures(ResolvableProfile.Builder builder, Object raw) {
         if (!(raw instanceof Map<?, ?> properties) || !(properties.get("textures") instanceof List<?> textures)) {
             return;
         }
         for (Object texture : textures) {
             if (texture instanceof Map<?, ?> map && map.get("Value") instanceof String value) {
                 String signature = map.get("Signature") instanceof String s ? s : null;
-                profile.setProperty(new ProfileProperty("textures", value, signature));
+                builder.addProperty(new ProfileProperty("textures", value, signature));
             }
         }
     }
@@ -552,7 +553,7 @@ public final class BlockEntityIO {
         // getLocation().getBlock() est incorrect pour les faces NORTH/WEST/DOWN
         // (l'entité est légèrement décalée hors du bloc) : on ajuste via la face.
         BlockFace face = ((Attachable) frame).getAttachedFace();
-        org.bukkit.block.Block attached = frame.getLocation().getBlock();
+        Block attached = frame.getLocation().getBlock();
         if (face.getModX() < 0 || face.getModY() < 0 || face.getModZ() < 0) {
             attached = attached.getRelative(face.getOppositeFace());
         }
@@ -584,7 +585,7 @@ public final class BlockEntityIO {
                                                         int sizeX, int sizeY, int sizeZ) {
         // Position du bloc auquel l'entité est attachée (même logique que ItemFrame).
         BlockFace face = ((Attachable) painting).getAttachedFace();
-        org.bukkit.block.Block attached = painting.getLocation().getBlock();
+        Block attached = painting.getLocation().getBlock();
         if (face.getModX() < 0 || face.getModY() < 0 || face.getModZ() < 0) {
             attached = attached.getRelative(face.getOppositeFace());
         }
@@ -652,7 +653,7 @@ public final class BlockEntityIO {
         ItemFrame frame = (ItemFrame) world.spawnEntity(loc, EntityType.ITEM_FRAME);
         if (entry.get("rotation") instanceof String rotation) {
             try {
-                frame.setRotation(org.bukkit.Rotation.valueOf(rotation.toUpperCase(Locale.ROOT)));
+                frame.setRotation(Rotation.valueOf(rotation.toUpperCase(Locale.ROOT)));
             } catch (IllegalArgumentException ignored) {
             }
         }

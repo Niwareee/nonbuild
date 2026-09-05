@@ -1,12 +1,13 @@
 package fr.niware.nonbuild.command;
 
-import java.io.File;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
-
+import fr.niware.nonbuild.Msg;
+import fr.niware.nonbuild.NonBuild;
+import fr.niware.nonbuild.model.Arena;
+import fr.niware.nonbuild.model.DeployedInstance;
+import fr.niware.nonbuild.placement.DeploymentMap;
+import fr.niware.nonbuild.schematic.SpongeSchematic;
+import fr.niware.nonbuild.storage.ArenaStorage;
+import fr.niware.nonbuild.work.ChunkPreloader;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -16,14 +17,8 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
-import fr.niware.nonbuild.Msg;
-import fr.niware.nonbuild.NonBuild;
-import fr.niware.nonbuild.model.Arena;
-import fr.niware.nonbuild.model.DeployedInstance;
-import fr.niware.nonbuild.placement.DeploymentMap;
-import fr.niware.nonbuild.schematic.SpongeSchematic;
-import fr.niware.nonbuild.storage.ArenaStorage;
-import fr.niware.nonbuild.work.ChunkPreloader;
+import java.sql.SQLException;
+import java.util.*;
 
 /**
  * Point d'entrée des commandes /deploy.
@@ -81,7 +76,7 @@ public class DeployCommand implements TabExecutor {
             case "tp" -> handleTp(sender, args);
             case "spawn" -> handleTpSpawn(sender);
             case "remove" -> handleRemove(sender, args);
-            case "rebuild", "--rebuild" -> rebuilder.handleRebuild(sender);
+            case "rebuild" -> this.rebuilder.handleRebuild(sender);
             case "help" -> {
                 sendHelp(sender);
                 yield true;
@@ -119,9 +114,13 @@ public class DeployCommand implements TabExecutor {
             return true;
         }
 
-        File schematicFile = plugin.getArenas().schematicFile(slug);
-        if (!schematicFile.exists()) {
-            Msg.error(sender, "Schematic manquante pour <yellow>" + slug + "<red>. Refaites /build edit " + slug + " puis /build save.");
+        try {
+            if (!plugin.getArenas().hasSchematic(slug)) {
+                Msg.error(sender, "Schematic manquante pour <yellow>" + slug + "<red>. Refaites /build edit " + slug + " puis /build save.");
+                return true;
+            }
+        } catch (SQLException e) {
+            Msg.error(sender, "Erreur de vérification de la schematic : " + e.getMessage());
             return true;
         }
 
@@ -140,8 +139,13 @@ public class DeployCommand implements TabExecutor {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             final SpongeSchematic schematic;
             try {
-                schematic = SpongeSchematic.read(schematicFile);
-            } catch (java.io.IOException e) {
+                schematic = plugin.getArenas().loadSchematic(slug);
+                if (schematic == null) {
+                    Bukkit.getScheduler().runTask(plugin, () ->
+                            Msg.error(sender, "Schematic manquante pour <yellow>" + slug));
+                    return;
+                }
+            } catch (Exception e) {
                 Bukkit.getScheduler().runTask(plugin, () ->
                         Msg.error(sender, "Schematic illisible : " + e.getMessage()));
                 return;

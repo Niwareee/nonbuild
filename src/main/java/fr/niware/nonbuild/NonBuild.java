@@ -8,8 +8,12 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import fr.niware.nonbuild.command.BuildCommand;
 import fr.niware.nonbuild.command.DeployCommand;
+import fr.niware.nonbuild.db.ArenaDefinitionDb;
 import fr.niware.nonbuild.db.DeploymentDb;
+import fr.niware.nonbuild.db.SqlArenaDefinitionDb;
 import fr.niware.nonbuild.db.SqlDeploymentDb;
+import fr.niware.nonbuild.db.SqlSystemConfigDb;
+import fr.niware.nonbuild.db.SystemConfigDb;
 import fr.niware.nonbuild.edit.SessionListener;
 import fr.niware.nonbuild.edit.SessionManager;
 import fr.niware.nonbuild.gui.GoalGUI;
@@ -20,7 +24,9 @@ import fr.niware.nonbuild.world.VoidChunkGenerator;
 public class NonBuild extends JavaPlugin {
 
     private Settings settings;
+    private ArenaDefinitionDb arenaDefinitionDb;
     private DeploymentDb deploymentDb;
+    private SystemConfigDb systemConfigDb;
     private ArenaStorage arenaStorage;
     private DeploymentStorage deploymentStorage;
     private SessionManager sessionManager;
@@ -32,9 +38,10 @@ public class NonBuild extends JavaPlugin {
         saveDefaultConfig();
 
         this.settings = new Settings(this);
+        this.arenaDefinitionDb = new SqlArenaDefinitionDb(this.settings, getLogger());
         this.deploymentDb = new SqlDeploymentDb(this.settings);
-        this.deploymentDb.initialize();
-        this.arenaStorage = new ArenaStorage(this);
+        this.systemConfigDb = new SqlSystemConfigDb(this.settings);
+        this.arenaStorage = new ArenaStorage(this, this.arenaDefinitionDb, this.systemConfigDb);
         this.arenaStorage.loadAll();
         this.deploymentStorage = new DeploymentStorage(this, this.deploymentDb);
         this.deploymentStorage.load();
@@ -97,8 +104,14 @@ public class NonBuild extends JavaPlugin {
     @Override
     public void onDisable() {
         getServer().getScheduler().cancelTasks(this);
+        if (arenaDefinitionDb != null) {
+            arenaDefinitionDb.close();
+        }
         if (deploymentDb != null) {
             deploymentDb.close();
+        }
+        if (systemConfigDb != null) {
+            systemConfigDb.close();
         }
     }
 
@@ -124,5 +137,9 @@ public class NonBuild extends JavaPlugin {
 
     public GoalGUI getGoalGUI() {
         return goalGUI;
+    }
+
+    public SystemConfigDb getSystemConfigDb() {
+        return systemConfigDb;
     }
 }

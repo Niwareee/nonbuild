@@ -4,6 +4,9 @@ main: fr.niware.nonbuild.NonBuild
 api-version: '26.2'
 description: Ajout et déploiement des arènes du plugin practice
 authors: [niware]
+libraries:
+  - com.zaxxer:HikariCP:7.1.0
+  - org.mariadb.jdbc:mariadb-java-client:3.5.10
 
 commands:
   build:

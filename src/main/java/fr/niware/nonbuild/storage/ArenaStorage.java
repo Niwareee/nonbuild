@@ -1,95 +1,140 @@
 package fr.niware.nonbuild.storage;
 
-import java.io.File;
 import java.io.IOException;
+import java.sql.SQLException;
+import java.text.Normalizer;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import fr.niware.nonbuild.db.ArenaDefinitionDb;
+import fr.niware.nonbuild.db.ArenaDefinitionRow;
+import fr.niware.nonbuild.db.SystemConfigDb;
 import fr.niware.nonbuild.model.Arena;
 import fr.niware.nonbuild.model.Point;
+import fr.niware.nonbuild.schematic.SpongeSchematic;
 
 public class ArenaStorage {
 
-    private final JavaPlugin plugin;
-    private final Map<String, Arena> arenas = new LinkedHashMap<>();
-    private final File arenasDir;
-    private final File schematicsDir;
+    private static final String CONFIG_KEY_SPAWN = "spawn";
 
-    public ArenaStorage(JavaPlugin plugin) {
+    private final JavaPlugin plugin;
+    private final ArenaDefinitionDb db;
+    private final SystemConfigDb systemConfigDb;
+    private final Map<String, Arena> arenas = new LinkedHashMap<>();
+
+    public ArenaStorage(JavaPlugin plugin, ArenaDefinitionDb db, SystemConfigDb systemConfigDb) {
         this.plugin = plugin;
-        this.arenasDir = new File(plugin.getDataFolder(), "arenas");
-        this.schematicsDir = new File(plugin.getDataFolder(), "schematics");
+        this.db = db;
+        this.systemConfigDb = systemConfigDb;
     }
 
     public void loadAll() {
         arenas.clear();
-        File[] files = arenasDir.listFiles((dir, name) -> name.endsWith(".yml"));
-        if (files == null) {
-            return;
-        }
-        for (File file : files) {
-            try {
-                Arena arena = parse(YamlConfiguration.loadConfiguration(file));
+        try {
+            List<ArenaDefinitionRow> rows = db.loadAll();
+            for (ArenaDefinitionRow row : rows) {
+                Arena arena = toArena(row);
                 if (arena != null) {
                     arenas.put(arena.getSlug(), arena);
-                } else {
-                    plugin.getLogger().warning("Fichier d'arène invalide ignoré : " + file.getName());
                 }
-            } catch (Exception e) {
-                plugin.getLogger().warning("Impossible de lire " + file.getName() + " : " + e.getMessage());
             }
+            plugin.getLogger().info("Arènes chargées depuis la base : " + arenas.size());
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Erreur de chargement des arènes : " + e.getMessage());
         }
     }
 
-    public void save(Arena arena) throws IOException {
-        YamlConfiguration yaml = new YamlConfiguration();
-        yaml.set("slug", arena.getSlug());
-        yaml.set("display-name", arena.getDisplayName());
-        yaml.set("world", arena.getWorld());
-        if (arena.getGameMode() != null) {
-            yaml.set("game-mode", arena.getGameMode());
-        }
-        yaml.set("saved-at", arena.getSavedAt());
-        setBlock(yaml, "corner1", arena.getCorner1());
-        setBlock(yaml, "corner2", arena.getCorner2());
-        setPoint(yaml, "center", arena.getCenter());
-        setPoint(yaml, "spawn1", arena.getSpawn1());
-        setPoint(yaml, "spawn2", arena.getSpawn2());
-        yaml.set("size.x", arena.sizeX());
-        yaml.set("size.y", arena.sizeY());
-        yaml.set("size.z", arena.sizeZ());
-        yaml.set("volume", arena.volume());
-
-        YamlFiles.saveAtomic(yaml, arenaFile(arena.getSlug()));
+    /**
+     * Sauvegarde les metadata d'une arène (sans la schematic).
+     */
+    public void save(Arena arena) throws SQLException {
+        ArenaDefinitionRow row = toRow(arena);
+        db.save(row);
         arenas.put(arena.getSlug(), arena);
+    }
+
+    /**
+     * Sauvegarde la schematic d'une arène en base.
+     */
+    public void saveSchematic(String slug, SpongeSchematic schematic) throws SQLException, IOException {
+        byte[] data = schematic.toBytes();
+        db.saveSchematic(slug, data);
+        plugin.getLogger().info("Schematic " + slug + " sauvegardée en base (" + data.length + " octets)");
+    }
+
+    /**
+     * Charge la schematic d'une arène depuis la base.
+     * Retourne null si l'arène n'a pas de schematic.
+     */
+    public SpongeSchematic loadSchematic(String slug) throws SQLException, IOException {
+        byte[] data = db.loadSchematic(slug);
+        if (data == null || data.length == 0) {
+            return null;
+        }
+        return SpongeSchematic.read(data);
+    }
+
+    /**
+     * Retourne true si l'arène a une schematic en base.
+     */
+    public boolean hasSchematic(String slug) throws SQLException {
+        byte[] data = db.loadSchematic(slug);
+        return data != null && data.length > 0;
+    }
+
+    // ---- Spawn schematic (stored in system_configs) ----
+
+    /**
+     * Sauvegarde la spawn schematic en base.
+     */
+    public void saveSpawnSchematic(SpongeSchematic schematic) throws SQLException, IOException {
+        byte[] data = schematic.toBytes();
+        systemConfigDb.save(CONFIG_KEY_SPAWN, data);
+        plugin.getLogger().info("Spawn schematic sauvegardée en base (" + data.length + " octets)");
+    }
+
+    /**
+     * Charge la spawn schematic depuis la base.
+     * Retourne null si aucune spawn n'est configurée.
+     */
+    public SpongeSchematic loadSpawnSchematic() throws SQLException, IOException {
+        byte[] data = systemConfigDb.load(CONFIG_KEY_SPAWN);
+        if (data == null || data.length == 0) {
+            return null;
+        }
+        return SpongeSchematic.read(data);
+    }
+
+    /**
+     * Retourne true si une spawn schematic existe en base.
+     */
+    public boolean hasSpawnSchematic() throws SQLException {
+        byte[] data = systemConfigDb.load(CONFIG_KEY_SPAWN);
+        return data != null && data.length > 0;
     }
 
     public boolean delete(String slug) {
         arenas.remove(slug);
-        boolean removed = false;
-        File yml = arenaFile(slug);
-        if (yml.exists()) {
-            removed = yml.delete();
+        try {
+            db.delete(slug);
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Erreur de suppression de " + slug + " : " + e.getMessage());
         }
-        File schem = schematicFile(slug);
-        if (schem.exists()) {
-            removed |= schem.delete();
-        }
-        return removed;
+        return true;
     }
 
     /**
-     * Renomme une arène : copie la schematic vers le nouveau slug,
-     * supprime les anciens fichiers, écrit le nouveau YAML.
+     * Renomme une arène : met à jour la base de données (slug + metadata).
+     * La schematic est conservée (UPDATE du slug ne touche pas la colonne).
      * Retourne false si l'arène n'existe pas, le nouveau slug est invalide,
      * ou une autre arène porte déjà ce slug.
      */
-    public boolean rename(String oldSlug, String newDisplayName) throws IOException {
+    public boolean rename(String oldSlug, String newDisplayName) throws SQLException {
         Arena old = arenas.get(oldSlug);
         if (old == null) {
             return false;
@@ -104,26 +149,13 @@ public class ArenaStorage {
 
         boolean sameSlug = newSlug.equals(oldSlug);
 
-        // Copier la schematic vers le nouveau nom (avant de supprimer l'ancienne)
-        if (!sameSlug) {
-            File oldSchem = schematicFile(oldSlug);
-            File newSchem = schematicFile(newSlug);
-            if (oldSchem.exists()) {
-                java.nio.file.Files.copy(oldSchem.toPath(), newSchem.toPath(),
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            }
-        }
-
-        // Supprimer les anciens fichiers (sauf si même slug)
+        // Supprimer l'ancienne entrée (schematic reste orpheline 1 tick, puis nettoyée par ON DUPLICATE KEY)
         arenas.remove(oldSlug);
         if (!sameSlug) {
-            File yml = arenaFile(oldSlug);
-            if (yml.exists()) {
-                yml.delete();
-            }
-            File schem = schematicFile(oldSlug);
-            if (schem.exists()) {
-                schem.delete();
+            try {
+                db.delete(oldSlug);
+            } catch (SQLException e) {
+                plugin.getLogger().severe("Erreur de suppression de l'ancienne arène : " + e.getMessage());
             }
         }
 
@@ -139,7 +171,6 @@ public class ArenaStorage {
         renamed.setSpawn2(old.getSpawn2());
         renamed.setSavedAt(System.currentTimeMillis());
 
-        // Écrire le nouveau YAML
         save(renamed);
         return true;
     }
@@ -170,9 +201,9 @@ public class ArenaStorage {
     }
 
     /**
-     * Met à jour le mode de jeu d'une arène et sauvegarde le YAML.
+     * Met à jour le mode de jeu d'une arène et sauvegarde en base.
      */
-    public boolean setGameMode(String slug, String gameMode) throws IOException {
+    public boolean setGameMode(String slug, String gameMode) throws SQLException {
         Arena arena = arenas.get(slug);
         if (arena == null) {
             return false;
@@ -186,74 +217,46 @@ public class ArenaStorage {
         return arenas.size();
     }
 
-    public File arenaFile(String slug) {
-        return new File(arenasDir, slug + ".yml");
+    private ArenaDefinitionRow toRow(Arena arena) {
+        return new ArenaDefinitionRow(
+                arena.getSlug(),
+                arena.getDisplayName(),
+                arena.getWorld(),
+                arena.getGameMode(),
+                arena.getCorner1()[0], arena.getCorner1()[1], arena.getCorner1()[2],
+                arena.getCorner2()[0], arena.getCorner2()[1], arena.getCorner2()[2],
+                arena.getCenter().x(), arena.getCenter().y(), arena.getCenter().z(),
+                arena.getCenter().yaw(), arena.getCenter().pitch(),
+                arena.getSpawn1().x(), arena.getSpawn1().y(), arena.getSpawn1().z(),
+                arena.getSpawn1().yaw(), arena.getSpawn1().pitch(),
+                arena.getSpawn2().x(), arena.getSpawn2().y(), arena.getSpawn2().z(),
+                arena.getSpawn2().yaw(), arena.getSpawn2().pitch(),
+                arena.getSavedAt(),
+                null
+        );
     }
 
-    public File schematicFile(String slug) {
-        return new File(schematicsDir, slug + ".schem");
-    }
-
-    private void setBlock(YamlConfiguration yaml, String path, int[] block) {
-        yaml.set(path + ".x", block[0]);
-        yaml.set(path + ".y", block[1]);
-        yaml.set(path + ".z", block[2]);
-    }
-
-    private void setPoint(YamlConfiguration yaml, String path, Point point) {
-        yaml.set(path + ".x", point.x());
-        yaml.set(path + ".y", point.y());
-        yaml.set(path + ".z", point.z());
-        yaml.set(path + ".yaw", point.yaw());
-        yaml.set(path + ".pitch", point.pitch());
-    }
-
-    private Arena parse(YamlConfiguration yaml) {
-        String slug = yaml.getString("slug");
-        if (slug == null || slug.isBlank()) {
-            return null;
-        }
-        Arena arena = new Arena(slug);
-        arena.setDisplayName(yaml.getString("display-name", slug));
-        arena.setWorld(yaml.getString("world"));
-        arena.setGameMode(yaml.getString("game-mode"));
-        arena.setSavedAt(yaml.getLong("saved-at"));
-        arena.setCorner1(readBlock(yaml, "corner1"));
-        arena.setCorner2(readBlock(yaml, "corner2"));
-        arena.setCenter(readPoint(yaml, "center"));
-        arena.setSpawn1(readPoint(yaml, "spawn1"));
-        arena.setSpawn2(readPoint(yaml, "spawn2"));
+    private Arena toArena(ArenaDefinitionRow row) {
+        Arena arena = new Arena(row.slug());
+        arena.setDisplayName(row.displayName());
+        arena.setWorld(row.world());
+        arena.setGameMode(row.gameMode());
+        arena.setSavedAt(row.savedAt());
+        arena.setCorner1(new int[]{row.corner1X(), row.corner1Y(), row.corner1Z()});
+        arena.setCorner2(new int[]{row.corner2X(), row.corner2Y(), row.corner2Z()});
+        arena.setCenter(new Point(row.centerX(), row.centerY(), row.centerZ(), row.centerYaw(), row.centerPitch()));
+        arena.setSpawn1(new Point(row.spawn1X(), row.spawn1Y(), row.spawn1Z(), row.spawn1Yaw(), row.spawn1Pitch()));
+        arena.setSpawn2(new Point(row.spawn2X(), row.spawn2Y(), row.spawn2Z(), row.spawn2Yaw(), row.spawn2Pitch()));
         if (!arena.isComplete() || arena.getWorld() == null) {
             return null;
         }
         return arena;
     }
 
-    private int[] readBlock(YamlConfiguration yaml, String path) {
-        ConfigurationSection section = yaml.getConfigurationSection(path);
-        if (section == null) {
-            return null;
-        }
-        return new int[]{section.getInt("x"), section.getInt("y"), section.getInt("z")};
-    }
-
-    private Point readPoint(YamlConfiguration yaml, String path) {
-        ConfigurationSection section = yaml.getConfigurationSection(path);
-        if (section == null) {
-            return null;
-        }
-        return new Point(
-                section.getDouble("x"),
-                section.getDouble("y"),
-                section.getDouble("z"),
-                (float) section.getDouble("yaw"),
-                (float) section.getDouble("pitch"));
-    }
-
     public static String slugify(String raw) {
-        String normalized = java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFD)
+        String normalized = Normalizer.normalize(raw, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "")
-                .toLowerCase(java.util.Locale.ROOT);
+                .toLowerCase(Locale.ROOT);
         String slug = normalized.replaceAll("[^a-z0-9_-]+", "-")
                 .replaceAll("-{2,}", "-")
                 .replaceAll("^-+|-+$", "");

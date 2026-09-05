@@ -1,60 +1,22 @@
 package fr.niware.nonbuild.db;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.bukkit.Bukkit;
-
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
-
-import org.bukkit.Bukkit;
-
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
-
-import fr.niware.nonbuild.Settings;
 import fr.niware.nonbuild.Settings;
 
 public class SqlDeploymentDb implements DeploymentDb {
 
     private static final String TABLE = "arenas";
-
-    private static final String CREATE_TABLE = """
-            CREATE TABLE IF NOT EXISTS %s (
-                instance_name VARCHAR(255) PRIMARY KEY,
-                arena VARCHAR(255) NOT NULL,
-                world VARCHAR(255) NOT NULL,
-                center_x DOUBLE NOT NULL,
-                center_y DOUBLE NOT NULL,
-                center_z DOUBLE NOT NULL,
-                center_yaw FLOAT NOT NULL,
-                center_pitch FLOAT NOT NULL,
-                corner1_x INT,
-                corner1_y INT,
-                corner1_z INT,
-                corner2_x INT,
-                corner2_y INT,
-                corner2_z INT,
-                spawn1_x DOUBLE,
-                spawn1_y DOUBLE,
-                spawn1_z DOUBLE,
-                spawn1_yaw FLOAT,
-                spawn1_pitch FLOAT,
-                spawn2_x DOUBLE,
-                spawn2_y DOUBLE,
-                spawn2_z DOUBLE,
-                spawn2_yaw FLOAT,
-                spawn2_pitch FLOAT,
-                cell_min_x INT,
-                cell_min_z INT,
-                cell_max_x INT,
-                cell_max_z INT,
-                deployed_at BIGINT NOT NULL,
-                INDEX idx_arena (arena)
-            )
-            """.formatted(TABLE);
 
     private static final String INSERT = """
             INSERT INTO %s (
@@ -109,17 +71,6 @@ public class SqlDeploymentDb implements DeploymentDb {
         config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
         config.addDataSourceProperty("useServerPrepStmts", "true");
         this.dataSource = new HikariDataSource(config);
-    }
-
-    @Override
-    public void initialize() {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(CREATE_TABLE)) {
-            ps.execute();
-            Bukkit.getLogger().info("[NonBuild] Base de données initialisée : " + TABLE);
-        } catch (SQLException e) {
-            Bukkit.getLogger().severe("[NonBuild] Erreur d'initialisation de la base : " + e.getMessage());
-        }
     }
 
     @Override

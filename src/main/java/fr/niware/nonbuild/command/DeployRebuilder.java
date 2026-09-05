@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -84,15 +85,24 @@ class DeployRebuilder {
                 Msg.error(sender, "Rebuild refusé : l'arène <yellow>" + slug + "<red> (dans deployments.yml) n'existe plus côté build.");
                 return true;
             }
-            if (!plugin.getArenas().schematicFile(slug).exists()) {
-                Msg.error(sender, "Rebuild refusé : schematic manquante pour <yellow>" + slug + "<red>. Refaites /build edit " + slug + " puis /build save.");
+            try {
+                if (!plugin.getArenas().hasSchematic(slug)) {
+                    Msg.error(sender, "Rebuild refusé : schematic manquante pour <yellow>" + slug + "<red>. Refaites /build edit " + slug + " puis /build save.");
+                    return true;
+                }
+            } catch (SQLException e) {
+                Msg.error(sender, "Rebuild refusé : erreur de vérification de la schematic pour <yellow>" + slug);
                 return true;
             }
         }
 
-        File spawnFile = new File(plugin.getDataFolder(), SPAWN_SCHEMATIC);
-        if (!spawnFile.exists()) {
-            Msg.error(sender, "Rebuild refusé : <yellow>" + SPAWN_SCHEMATIC + "<red> absent du dossier du plugin (plugins/NonBuild/).");
+        try {
+            if (!plugin.getArenas().hasSpawnSchematic()) {
+                Msg.error(sender, "Rebuild refusé : spawn schematic manquante en base. Importez-la avec /build importspawn ou via le script de migration.");
+                return true;
+            }
+        } catch (SQLException e) {
+            Msg.error(sender, "Rebuild refusé : erreur de vérification de la spawn schematic : " + e.getMessage());
             return true;
         }
 
@@ -110,12 +120,20 @@ class DeployRebuilder {
             SpongeSchematic loadedSpawn = null;
             String failure = null;
             try {
-                loadedSpawn = SpongeSchematic.read(spawnFile);
-                for (RebuildEntry entry : entries) {
-                    arenaSchematics.put(entry.slug(),
-                            SpongeSchematic.read(plugin.getArenas().schematicFile(entry.slug())));
+                loadedSpawn = plugin.getArenas().loadSpawnSchematic();
+                if (loadedSpawn == null) {
+                    failure = "spawn schematic manquante en base";
+                } else {
+                    for (RebuildEntry entry : entries) {
+                        SpongeSchematic schem = plugin.getArenas().loadSchematic(entry.slug());
+                        if (schem == null) {
+                            failure = "schematic manquante pour " + entry.slug();
+                            break;
+                        }
+                        arenaSchematics.put(entry.slug(), schem);
+                    }
                 }
-            } catch (IOException e) {
+            } catch (IOException | SQLException e) {
                 failure = e.getMessage();
             }
             if (failure != null) {

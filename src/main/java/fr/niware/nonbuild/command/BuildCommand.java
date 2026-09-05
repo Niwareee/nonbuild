@@ -1,7 +1,7 @@
 package fr.niware.nonbuild.command;
 
-import java.io.File;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -331,28 +331,26 @@ public class BuildCommand implements TabExecutor {
     }
 
     private void finishSave(Player player, EditSession session, Arena arena, SpongeSchematic schematic, long nanos) {
-        File schematicFile = plugin.getArenas().schematicFile(session.getSlug());
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
-                schematic.write(schematicFile);
-            } catch (IOException e) {
+                plugin.getArenas().saveSchematic(session.getSlug(), schematic);
+            } catch (SQLException | IOException e) {
                 Bukkit.getScheduler().runTask(plugin, () ->
                         Msg.error(player, "Impossible d'écrire la schematic : " + e.getMessage()));
-                plugin.getLogger().severe("Erreur d'écriture schematic " + schematicFile + " : " + e.getMessage());
+                plugin.getLogger().severe("Erreur d'écriture schematic " + session.getSlug() + " : " + e.getMessage());
                 return;
             }
             Bukkit.getScheduler().runTask(plugin, () -> {
                 try {
                     arena.setSavedAt(System.currentTimeMillis());
                     plugin.getArenas().save(arena);
-                } catch (IOException e) {
-                    Msg.error(player, "Impossible d'écrire le YAML : " + e.getMessage());
+                } catch (SQLException e) {
+                    Msg.error(player, "Impossible de sauvegarder en base : " + e.getMessage());
                     return;
                 }
                 closeSession(player, session);
                 Msg.ok(player, "Arène <white>" + session.getDisplayName() + " <green>sauvegardée en <yellow>" + (nanos / 1_000_000) + " ms<green>.");
-                Msg.raw(player, "  <gray>YAML : <white>arenas/" + session.getSlug() + ".yml");
-                Msg.raw(player, "  <gray>Schematic : <white>schematics/" + session.getSlug() + ".schem");
+                Msg.raw(player, "  <gray>Schematic : <white>en base de données");
                 Msg.info(player, "Déployez-la avec <yellow>/deploy " + session.getSlug() + " <nombre><gray>.");
             });
         });
@@ -387,7 +385,6 @@ public class BuildCommand implements TabExecutor {
             Msg.error(sender, "Arène introuvable : " + slug);
             return true;
         }
-        File schematicFile = plugin.getArenas().schematicFile(slug);
         List<DeployedInstance> instances = plugin.getDeployments().byArena(slug);
 
         Msg.raw(sender, "<gold><bold>Arène : <yellow>" + arena.getDisplayName() + " <dark_gray>(" + slug + ")");
@@ -399,7 +396,12 @@ public class BuildCommand implements TabExecutor {
         Msg.raw(sender, "  <gray>Centre : <white>" + format(arena.getCenter()));
         Msg.raw(sender, "  <gray>Spawn 1 : <white>" + format(arena.getSpawn1()));
         Msg.raw(sender, "  <gray>Spawn 2 : <white>" + format(arena.getSpawn2()));
-        Msg.raw(sender, "  <gray>Schematic : " + (schematicFile.exists() ? "<green>✔ présente" : "<red>✖ manquante"));
+        try {
+            boolean hasSchem = plugin.getArenas().hasSchematic(slug);
+            Msg.raw(sender, "  <gray>Schematic : " + (hasSchem ? "<green>✔ présente" : "<red>✖ manquante"));
+        } catch (SQLException e) {
+            Msg.raw(sender, "  <gray>Schematic : <red>erreur de vérification");
+        }
         Msg.raw(sender, "  <gray>Instances déployées : <white>" + instances.size());
         if (arena.getGameMode() != null) {
             String modeName = plugin.getSettings().gameModes().get(arena.getGameMode());
@@ -476,7 +478,7 @@ public class BuildCommand implements TabExecutor {
             return true;
         }
         plugin.getArenas().delete(slug);
-        Msg.ok(player, "Arène <yellow>" + slug + "<green> supprimée (YAML + schematic).");
+        Msg.ok(player, "Arène <yellow>" + slug + "<green> supprimée (base + schematic).");
         return true;
     }
 
@@ -521,11 +523,11 @@ public class BuildCommand implements TabExecutor {
             plugin.getArenas().rename(oldSlug, newDisplayName);
             int deployedUpdated = plugin.getDeployments().renameArena(oldSlug, newSlug);
             Msg.ok(player, "Arène <yellow>" + oldSlug + "<green> renommée en <yellow>" + newSlug + " <gray>(" + newDisplayName + ")");
-            Msg.info(player, "Fichiers mis à jour : arenas/" + newSlug + ".yml + schematics/" + newSlug + ".schem");
+            Msg.info(player, "Schematic mise à jour : schematics/" + newSlug + ".schem");
             if (deployedUpdated > 0) {
                 Msg.ok(player, deployedUpdated + " instance(s) déployée(s) mise(s) à jour (coordonnées conservées).");
             }
-        } catch (IOException e) {
+        } catch (SQLException e) {
             Msg.error(player, "Erreur lors du renommage : " + e.getMessage());
         }
         return true;
@@ -552,7 +554,7 @@ public class BuildCommand implements TabExecutor {
         try {
             plugin.getArenas().setGameMode(slug, modeKey);
             Msg.ok(player, "Arène <yellow>" + slug + "<green> assignée au mode <yellow>" + gameModes.get(modeKey) + "<green>.");
-        } catch (IOException e) {
+        } catch (SQLException e) {
             Msg.error(player, "Erreur lors de la sauvegarde : " + e.getMessage());
         }
         return true;
@@ -569,7 +571,7 @@ public class BuildCommand implements TabExecutor {
         Msg.raw(sender, "<yellow>/build setcorner1|setcorner2 <gray>— coins englobant l'arène");
         Msg.raw(sender, "<yellow>/build setspawn1|setspawn2 <gray>— spawns de duel");
         Msg.raw(sender, "<yellow>/build setcenter <gray>— centre de l'arène");
-        Msg.raw(sender, "<yellow>/build save <gray>— capturer + sauvegarder (YAML + schematic)");
+        Msg.raw(sender, "<yellow>/build save <gray>— capturer + sauvegarder (base + schematic)");
         Msg.raw(sender, "<yellow>/build status|cancel <gray>— état de la session / annuler");
         Msg.raw(sender, "<yellow>/build edit <arène> <gray>— recharger une arène en édition");
         Msg.raw(sender, "<yellow>/build tp <arène> <gray>— téléporter au centre de l'arène (monde de build)");

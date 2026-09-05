@@ -6,8 +6,6 @@ import java.util.Map;
 
 public interface DeploymentDb {
 
-    void initialize();
-
     void close();
 
     Map<String, DeployedInstanceRow> loadAll(List<String> order) throws SQLException;

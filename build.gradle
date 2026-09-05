@@ -16,8 +16,8 @@ repositories {
 
 dependencies {
     compileOnly "io.papermc.paper:paper-api:26.2.build.+"
-    implementation 'com.zaxxer:HikariCP:6.3.0'
-    implementation 'org.mariadb.jdbc:mariadb-java-client:3.5.1'
+    implementation 'com.zaxxer:HikariCP:7.1.0'
+    implementation 'org.mariadb.jdbc:mariadb-java-client:3.5.10'
 
     testImplementation "io.papermc.paper:paper-api:26.2.build.+"
     testImplementation platform('org.junit:junit-bom:5.10.2')
@@ -29,10 +29,6 @@ dependencies {
 
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(25))
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.compilerArgs << "-Xlint:deprecation"
 }
 
 tasks.named('test') {

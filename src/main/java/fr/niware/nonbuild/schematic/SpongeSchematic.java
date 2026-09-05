@@ -1,9 +1,13 @@
 package fr.niware.nonbuild.schematic;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -103,7 +107,140 @@ public final class SpongeSchematic {
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             throw new IOException("Impossible de créer le dossier " + parent);
         }
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            Nbt.writeCompressed(buildRoot(), out);
+        }
+    }
 
+    /**
+     * Serialize this schematic to a compressed byte array (NBT).
+     */
+    public byte[] toBytes() throws IOException {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Nbt.writeCompressed(buildRoot(), out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * Write this schematic to an output stream (compressed NBT).
+     */
+    public void write(OutputStream out) throws IOException {
+        Nbt.writeCompressed(buildRoot(), out);
+    }
+
+    public static SpongeSchematic read(File file) throws IOException {
+        try (FileInputStream in = new FileInputStream(file)) {
+            return read(in);
+        }
+    }
+
+    /**
+     * Read a schematic from a byte array.
+     */
+    public static SpongeSchematic read(byte[] data) throws IOException {
+        try (ByteArrayInputStream in = new ByteArrayInputStream(data)) {
+            return read(in);
+        }
+    }
+
+    /**
+     * Read a schematic from an input stream.
+     */
+    public static SpongeSchematic read(InputStream in) throws IOException {
+        Map<String, Object> root;
+        try {
+            root = Nbt.readCompressed(in);
+        } finally {
+            in.close();
+        }
+
+        Object wrapped = root.get("Schematic");
+        if (wrapped instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> schematic = (Map<String, Object>) wrapped;
+            root = schematic;
+        }
+
+        int version = asInt(root.get("Version"), -1);
+        if (version < 2) {
+            throw new IOException("Format non supporté (version " + version + ")");
+        }
+
+        int width = asInt(root.get("Width"), -1);
+        int height = asInt(root.get("Height"), -1);
+        int length = asInt(root.get("Length"), -1);
+        if (width <= 0 || height <= 0 || length <= 0) {
+            throw new IOException("Dimensions invalides");
+        }
+
+        String[] states;
+        byte[] data;
+        if (version >= 3) {
+            if (!(root.get("Blocks") instanceof Map)) {
+                throw new IOException("Compound Blocks manquant");
+            }
+            Map<?, ?> blocks = (Map<?, ?>) root.get("Blocks");
+
+            if (!(blocks.get("Palette") instanceof Map)) {
+                throw new IOException("Blocks/Palette manquant");
+            }
+            Map<?, ?> paletteCompound = (Map<?, ?>) blocks.get("Palette");
+            int maxId = -1;
+            for (Object value : paletteCompound.values()) {
+                maxId = Math.max(maxId, asInt(value, -1));
+            }
+            if (maxId < 0) {
+                throw new IOException("Blocks/Palette vide");
+            }
+            states = new String[maxId + 1];
+            for (Map.Entry<?, ?> entry : paletteCompound.entrySet()) {
+                int id = asInt(entry.getValue(), -1);
+                if (id < 0) {
+                    throw new IOException("Palette invalide (id " + entry.getValue() + ")");
+                }
+                states[id] = String.valueOf(entry.getKey());
+            }
+
+            if (!(blocks.get("Data") instanceof byte[])) {
+                throw new IOException("Blocks/Data manquant");
+            }
+            data = (byte[]) blocks.get("Data");
+        } else {
+            Object paletteObj = root.get("BlockStatePalette");
+            if (!(paletteObj instanceof Map)) {
+                throw new IOException("BlockStatePalette manquant");
+            }
+            Map<?, ?> paletteCompound = (Map<?, ?>) paletteObj;
+            int maxId = -1;
+            for (Object key : paletteCompound.keySet()) {
+                maxId = Math.max(maxId, Integer.parseInt(String.valueOf(key)));
+            }
+            states = new String[maxId + 1];
+            for (Map.Entry<?, ?> entry : paletteCompound.entrySet()) {
+                states[Integer.parseInt(String.valueOf(entry.getKey()))] = String.valueOf(entry.getValue());
+            }
+
+            Object dataObj = root.get("BlockData");
+            if (!(dataObj instanceof byte[])) {
+                throw new IOException("BlockData manquant");
+            }
+            data = (byte[]) dataObj;
+        }
+
+        long volume = (long) width * height * length;
+        int[] indices = decodeVarInts(data, volume, "stream");
+
+        Object offsetObj = root.get("Offset");
+        int[] offset = {0, 0, 0};
+        if (offsetObj instanceof int[] array && array.length == 3) {
+            offset = array.clone();
+        }
+
+        return new SpongeSchematic(width, height, length, indices, states, offset, parseBlockEntities(root));
+    }
+
+    Map<String, Object> buildRoot() {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("Version", 2);
         root.put("Width", (short) width);
@@ -121,102 +258,7 @@ public final class SpongeSchematic {
         if (!blockEntities.isEmpty()) {
             root.put("BlockEntities", new ArrayList<Object>(blockEntities));
         }
-
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            Nbt.writeCompressed(root, out);
-        }
-    }
-
-    public static SpongeSchematic read(File file) throws IOException {
-        Map<String, Object> root;
-        try (FileInputStream in = new FileInputStream(file)) {
-            root = Nbt.readCompressed(in);
-        }
-
-        Object wrapped = root.get("Schematic");
-        if (wrapped instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> schematic = (Map<String, Object>) wrapped;
-            root = schematic;
-        }
-
-        int version = asInt(root.get("Version"), -1);
-        if (version < 2) {
-            throw new IOException("Format non supporté (version " + version + " dans " + file.getName()
-                    + ") : sauvegarder avec //schem save WorldEdit (Sponge v2 ou v3)");
-        }
-
-        int width = asInt(root.get("Width"), -1);
-        int height = asInt(root.get("Height"), -1);
-        int length = asInt(root.get("Length"), -1);
-        if (width <= 0 || height <= 0 || length <= 0) {
-            throw new IOException("Dimensions invalides dans " + file.getName());
-        }
-
-        String[] states;
-        byte[] data;
-        if (version >= 3) {
-            if (!(root.get("Blocks") instanceof Map)) {
-                throw new IOException("Compound Blocks manquant dans " + file.getName());
-            }
-            Map<?, ?> blocks = (Map<?, ?>) root.get("Blocks");
-
-            if (!(blocks.get("Palette") instanceof Map)) {
-                throw new IOException("Blocks/Palette manquant dans " + file.getName());
-            }
-            Map<?, ?> paletteCompound = (Map<?, ?>) blocks.get("Palette");
-            int maxId = -1;
-            for (Object value : paletteCompound.values()) {
-                maxId = Math.max(maxId, asInt(value, -1));
-            }
-            if (maxId < 0) {
-                throw new IOException("Blocks/Palette vide dans " + file.getName());
-            }
-            states = new String[maxId + 1];
-            for (Map.Entry<?, ?> entry : paletteCompound.entrySet()) {
-                int id = asInt(entry.getValue(), -1);
-                if (id < 0) {
-                    throw new IOException("Palette invalide dans " + file.getName() + " (id " + entry.getValue() + ")");
-                }
-                states[id] = String.valueOf(entry.getKey());
-            }
-
-            if (!(blocks.get("Data") instanceof byte[])) {
-                throw new IOException("Blocks/Data manquant dans " + file.getName());
-            }
-            data = (byte[]) blocks.get("Data");
-        } else {
-            Object paletteObj = root.get("BlockStatePalette");
-            if (!(paletteObj instanceof Map)) {
-                throw new IOException("BlockStatePalette manquant dans " + file.getName());
-            }
-            Map<?, ?> paletteCompound = (Map<?, ?>) paletteObj;
-            int maxId = -1;
-            for (Object key : paletteCompound.keySet()) {
-                maxId = Math.max(maxId, Integer.parseInt(String.valueOf(key)));
-            }
-            states = new String[maxId + 1];
-            for (Map.Entry<?, ?> entry : paletteCompound.entrySet()) {
-                states[Integer.parseInt(String.valueOf(entry.getKey()))] = String.valueOf(entry.getValue());
-            }
-
-            Object dataObj = root.get("BlockData");
-            if (!(dataObj instanceof byte[])) {
-                throw new IOException("BlockData manquant dans " + file.getName());
-            }
-            data = (byte[]) dataObj;
-        }
-
-        long volume = (long) width * height * length;
-        int[] indices = decodeVarInts(data, volume, file.getName());
-
-        Object offsetObj = root.get("Offset");
-        int[] offset = {0, 0, 0};
-        if (offsetObj instanceof int[] array && array.length == 3) {
-            offset = array.clone();
-        }
-
-        return new SpongeSchematic(width, height, length, indices, states, offset, parseBlockEntities(root));
+        return root;
     }
 
     /**

@@ -20,6 +20,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -155,11 +156,11 @@ class BuildCommandTest {
 
     @Test
     void addarenaCreeUneSessionEtPasseEnCreative() {
-        run("addarena", "Mon Arene");
+        run("addarena", "mon-arene");
         EditSession session = sessions.get(player.getUniqueId());
         assertNotNull(session);
         assertEquals("mon-arene", session.getSlug());
-        assertEquals("Mon Arene", session.getDisplayName());
+        assertEquals("mon-arene", session.getDisplayName());
         verify(player).setGameMode(GameMode.CREATIVE);
     }
 
@@ -190,6 +191,30 @@ class BuildCommandTest {
     @Test
     void addarenaRefuseUnNomSansCaracteresValides() {
         run("addarena", "!!!");
+        assertFalse(sessions.has(player.getUniqueId()));
+    }
+
+    @Test
+    void addarenaRefuseCaracteresNonAnglais() {
+        run("addarena", "arène");
+        assertFalse(sessions.has(player.getUniqueId()));
+    }
+
+    @Test
+    void addarenaRefuseCaracteresSpeciaux() {
+        run("addarena", "arena_ñoño");
+        assertFalse(sessions.has(player.getUniqueId()));
+    }
+
+    @Test
+    void addarenaAccepteNomAnglaisSimple() {
+        run("addarena", "MyArena");
+        assertTrue(sessions.has(player.getUniqueId()));
+    }
+
+    @Test
+    void addarenaRefuseNomAvecEspace() {
+        run("addarena", "mon", "arene");
         assertFalse(sessions.has(player.getUniqueId()));
     }
 
@@ -308,7 +333,7 @@ class BuildCommandTest {
     @Test
     void saveCompletCaptureSauvegardeEtFermeLaSession() throws IOException {
         stubStoneBlocks();
-        prepareCompleteSession("mon arene");
+        prepareCompleteSession("mon-arene");
 
         run("save");
         Runnable capture = BukkitServerFixture.pollTimerTask();
@@ -580,5 +605,167 @@ class BuildCommandTest {
         CommandSender console = mock(CommandSender.class);
         assertTrue(command.onCommand(console, cmd, "build", new String[]{"tp", "getdown"}));
         verify(player, never()).teleport(org.mockito.ArgumentMatchers.any(Location.class));
+    }
+
+    // ---- rename ----
+
+    @Test
+    void renameSansArgumentNeFaitRien() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename");
+        assertTrue(arenas.exists("getdown"));
+    }
+
+    @Test
+    void renameSansNouveauNomNeFaitRien() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename", "getdown");
+        assertTrue(arenas.exists("getdown"));
+        assertFalse(arenas.exists("nouveau"));
+    }
+
+    @Test
+    void renameAreneIntrouvableNeFaitRien() {
+        run("rename", "fantome", "Nouveau");
+    }
+
+    @Test
+    void renameChangeSlugEtNom() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename", "getdown", "new-arena");
+
+        assertFalse(arenas.exists("getdown"));
+        assertTrue(arenas.exists("new-arena"));
+        Arena renamed = arenas.get("new-arena");
+        assertEquals("new-arena", renamed.getDisplayName());
+        assertEquals("new-arena", renamed.getSlug());
+    }
+
+    @Test
+    void renameConserveLesDonneesDeLArene() throws Exception {
+        Arena original = sampleArena("getdown");
+        arenas.save(original);
+        run("rename", "getdown", "Renamed");
+
+        Arena renamed = arenas.get("renamed");
+        assertArrayEquals(new int[]{0, 60, 0}, renamed.getCorner1());
+        assertArrayEquals(new int[]{2, 62, 2}, renamed.getCorner2());
+        assertEquals(Point.of(1, 61, 1), renamed.getCenter());
+        assertEquals(Point.of(0.5, 61, 0.5), renamed.getSpawn1());
+        assertEquals(Point.of(1.5, 61, 1.5), renamed.getSpawn2());
+    }
+
+    @Test
+    void renameRefuseSiAreneCibleExiste() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        arenas.save(sampleArena("autre"));
+        run("rename", "getdown", "Autre");
+
+        assertTrue(arenas.exists("getdown"));
+        assertEquals(2, arenas.count());
+    }
+
+    @Test
+    void renameMetAJourInstancesDeployees() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        DeployedInstance inst = new DeployedInstance("getdown-1", "getdown", "prod",
+                Point.of(100, 60, 100), new int[]{90, 60, 90}, new int[]{110, 70, 110},
+                Point.of(95, 61, 95), Point.of(105, 61, 105),
+                new int[]{80, 80}, new int[]{120, 120}, System.currentTimeMillis());
+        deployments.put(inst);
+
+        run("rename", "getdown", "Nouveau");
+        assertTrue(arenas.exists("nouveau"));
+        assertFalse(arenas.exists("getdown"));
+        // Instance déployée conserve ses coordonnées mais pointe vers le nouveau slug
+        DeployedInstance updated = deployments.get("getdown-1");
+        assertNotNull(updated);
+        assertEquals("nouveau", updated.getArena());
+        assertArrayEquals(new int[]{90, 60, 90}, updated.getCorner1());
+        assertArrayEquals(new int[]{110, 70, 110}, updated.getCorner2());
+    }
+
+    @Test
+    void renameRefuseNomTropLong() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename", "getdown", "a".repeat(65));
+        assertTrue(arenas.exists("getdown"));
+    }
+
+    @Test
+    void renameRefuseNomInvalide() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename", "getdown", "!!!");
+        assertTrue(arenas.exists("getdown"));
+    }
+
+    @Test
+    void renameRefuseCaracteresNonAnglais() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename", "getdown", "arène");
+        assertTrue(arenas.exists("getdown"));
+        assertFalse(arenas.exists("arene"));
+    }
+
+    @Test
+    void renameAccepteNomAnglais() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename", "getdown", "new-arena");
+        assertTrue(arenas.exists("new-arena"));
+        assertFalse(arenas.exists("getdown"));
+    }
+
+    @Test
+    void renameRefuseNomAvecEspace() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        run("rename", "getdown", "new", "arena");
+        assertTrue(arenas.exists("getdown"));
+        assertFalse(arenas.exists("new-arena"));
+    }
+
+    @Test
+    void renameSupprimeAnciensFichiers() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        File oldYml = arenas.arenaFile("getdown");
+        File oldSchem = arenas.schematicFile("getdown");
+        assertTrue(oldYml.exists());
+        assertTrue(oldSchem.getParentFile().mkdirs() || oldSchem.getParentFile().exists());
+        Files.writeString(oldSchem.toPath(), "schematic-data");
+
+        run("rename", "getdown", "Renamed");
+
+        assertFalse(oldYml.exists());
+        assertFalse(oldSchem.exists());
+        assertTrue(arenas.arenaFile("renamed").exists());
+        assertTrue(arenas.schematicFile("renamed").exists());
+    }
+
+    @Test
+    void renameCopieLaSchematic() throws Exception {
+        arenas.save(sampleArena("getdown"));
+        File schem = arenas.schematicFile("getdown");
+        assertTrue(schem.getParentFile().mkdirs() || schem.getParentFile().exists());
+        Files.writeString(schem.toPath(), "binary-content-123");
+
+        run("rename", "getdown", "Renamed");
+
+        assertEquals("binary-content-123",
+                Files.readString(arenas.schematicFile("renamed").toPath()));
+    }
+
+    @Test
+    void renameMemeSlugChangeSeulementLeNom() throws Exception {
+        Arena original = sampleArena("getdown");
+        arenas.save(original);
+        long originalSavedAt = original.getSavedAt();
+        Thread.sleep(10);
+
+        // "Getdown" slugifie en "getdown" → même slug, seul le display-name change
+        run("rename", "getdown", "Getdown");
+
+        Arena renamed = arenas.get("getdown");
+        assertEquals("Getdown", renamed.getDisplayName());
+        assertEquals("getdown", renamed.getSlug());
+        assertTrue(renamed.getSavedAt() > originalSavedAt);
     }
 }

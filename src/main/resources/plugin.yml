@@ -8,11 +8,11 @@ authors: [niware]
 commands:
   build:
     description: Gestion des arènes (édition, sauvegarde)
-    usage: /build <addarena|edit|setcorner1|setcorner2|setspawn1|setspawn2|setcenter|status|save|cancel|info|list|tp|delete>
+    usage: /build <addarena|edit|setcorner1|setcorner2|setspawn1|setspawn2|setcenter|status|save|cancel|info|list|tp|delete|rename>
     permission: nonbuild.build
   deploy:
     description: Déploiement des arènes en production
-    usage: /deploy <nom> <nombre> | /deploy list | /deploy map | /deploy tp <instance> | /deploy remove <instance ou arène> | /deploy rebuild
+    usage: /deploy <nom> <nombre> | /deploy list | /deploy map [instance] | /deploy tp <instance> | /deploy remove <instance ou arène> | /deploy rebuild
     permission: nonbuild.deploy
 
 permissions:

@@ -1,5 +1,8 @@
 package fr.niware.nonbuild;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class Settings {
@@ -13,6 +16,7 @@ public class Settings {
     private final int captureBlocksPerTick;
     private final int maxVolume;
     private final boolean setCreativeOnEdit;
+    private final Map<String, String> gameModes;
 
     public Settings(JavaPlugin plugin) {
         org.bukkit.configuration.Configuration cfg = plugin.getConfig();
@@ -25,6 +29,16 @@ public class Settings {
         this.captureBlocksPerTick = Math.max(1000, cfg.getInt("pasting.capture-blocks-per-tick", 50000));
         this.maxVolume = cfg.getInt("limits.max-volume", 4_000_000);
         this.setCreativeOnEdit = cfg.getBoolean("edit.set-creative", true);
+
+        // Lire la liste des modes de jeu (clé → nom affiché)
+        Map<String, String> modes = new LinkedHashMap<>();
+        org.bukkit.configuration.ConfigurationSection section = cfg.getConfigurationSection("game-modes");
+        if (section != null) {
+            for (String key : section.getKeys(false)) {
+                modes.put(key, section.getString(key, key));
+            }
+        }
+        this.gameModes = Map.copyOf(modes);
     }
 
     public String buildWorld() {
@@ -61,5 +75,9 @@ public class Settings {
 
     public boolean setCreativeOnEdit() {
         return setCreativeOnEdit;
+    }
+
+    public Map<String, String> gameModes() {
+        return gameModes;
     }
 }

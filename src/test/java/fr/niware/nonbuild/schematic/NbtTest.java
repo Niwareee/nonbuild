@@ -1,7 +1,5 @@
 package fr.niware.nonbuild.schematic;
 
-import org.junit.jupiter.api.Test;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -13,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 class NbtTest {
 
@@ -20,6 +19,8 @@ class NbtTest {
     void roundTripTousLesTypes() throws Exception {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("b", (byte) 5);
+        root.put("boolTrue", true);
+        root.put("boolFalse", false);
         root.put("s", (short) 300);
         root.put("i", 70_000);
         root.put("l", 5_000_000_000L);
@@ -41,6 +42,8 @@ class NbtTest {
         Map<String, Object> back = Nbt.readCompressed(new ByteArrayInputStream(out.toByteArray()));
 
         assertEquals((byte) 5, back.get("b"));
+        assertEquals((byte) 1, back.get("boolTrue"));
+        assertEquals((byte) 0, back.get("boolFalse"));
         assertEquals((short) 300, back.get("s"));
         assertEquals(70_000, back.get("i"));
         assertEquals(5_000_000_000L, back.get("l"));
@@ -71,6 +74,8 @@ class NbtTest {
     @Test
     void typeOfReconnaitLesTypes() {
         assertEquals(Nbt.BYTE, Nbt.typeOf((byte) 1));
+        assertEquals(Nbt.BYTE, Nbt.typeOf(true));
+        assertEquals(Nbt.BYTE, Nbt.typeOf(false));
         assertEquals(Nbt.SHORT, Nbt.typeOf((short) 1));
         assertEquals(Nbt.INT, Nbt.typeOf(1));
         assertEquals(Nbt.LONG, Nbt.typeOf(1L));

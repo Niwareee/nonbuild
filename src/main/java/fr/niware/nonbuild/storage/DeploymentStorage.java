@@ -164,6 +164,45 @@ public class DeploymentStorage {
         return result;
     }
 
+    /**
+     * Retourne les instances dont le slug d'arène correspond (case-insensitive)
+     * à la clé du mode de jeu. Ex: mode "GETDOWN" → arènes "getdown", "getdown-2" etc.
+     */
+    public List<DeployedInstance> byGameMode(String modeKey) {
+        List<DeployedInstance> result = new ArrayList<>();
+        String lowerKey = modeKey.toLowerCase(java.util.Locale.ROOT);
+        for (DeployedInstance instance : instances.values()) {
+            if (instance.getArena().toLowerCase(java.util.Locale.ROOT).startsWith(lowerKey)) {
+                result.add(instance);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Met à jour le slug d'arène de toutes les instances déployées.
+     * Les coordonnées physiques restent inchangées ; seul le champ {@code arena}
+     * dans deployments.yml est mis à jour.
+     */
+    public int renameArena(String oldSlug, String newSlug) {
+        int updated = 0;
+        for (Map.Entry<String, DeployedInstance> entry : new java.util.ArrayList<>(instances.entrySet())) {
+            DeployedInstance instance = entry.getValue();
+            if (instance.getArena().equals(oldSlug)) {
+                DeployedInstance updatedInstance = new DeployedInstance(
+                        instance.getName(), newSlug, instance.getWorld(), instance.getCenter(),
+                        instance.getCorner1(), instance.getCorner2(), instance.getSpawn1(), instance.getSpawn2(),
+                        instance.getCellMinXZ(), instance.getCellMaxXZ(), instance.getDeployedAt());
+                instances.put(entry.getKey(), updatedInstance);
+                updated++;
+            }
+        }
+        if (updated > 0) {
+            saveSync();
+        }
+        return updated;
+    }
+
     public int count() {
         return instances.size();
     }

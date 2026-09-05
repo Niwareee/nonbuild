@@ -14,7 +14,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import org.bukkit.*;
+import org.bukkit.Bukkit;
+import org.bukkit.Difficulty;
+import org.bukkit.GameMode;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.WorldCreator;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -60,7 +65,7 @@ public class DeployCommand implements TabExecutor {
         String first = args[0].toLowerCase(Locale.ROOT);
         return switch (first) {
             case "list" -> handleList(sender);
-            case "map" -> handleMap(sender);
+            case "map" -> handleMap(sender, args);
             case "tp" -> handleTp(sender, args);
             case "remove" -> handleRemove(sender, args);
             case "rebuild", "--rebuild" -> handleRebuild(sender);
@@ -664,14 +669,26 @@ public class DeployCommand implements TabExecutor {
         return true;
     }
 
-    private boolean handleMap(CommandSender sender) {
-        List<DeployedInstance> instances = new ArrayList<>(plugin.getDeployments().all());
+    private boolean handleMap(CommandSender sender, String[] args) {
         int[] playerPos = null;
         if (sender instanceof org.bukkit.entity.Player p) {
             org.bukkit.Location loc = p.getLocation();
             playerPos = new int[]{(int) loc.getX(), (int) loc.getZ()};
         }
-        for (String line : DeploymentMap.render(instances, plugin.getSettings().spawnProtectionRadius(), playerPos)) {
+        int radius = plugin.getSettings().spawnProtectionRadius();
+        if (args.length >= 2) {
+            DeployedInstance focus = plugin.getDeployments().get(args[1]);
+            if (focus == null) {
+                Msg.error(sender, "Instance introuvable : " + args[1] + " (<gray>voir /deploy list<red>)");
+                return true;
+            }
+            for (String line : DeploymentMap.renderZoom(focus, radius, playerPos)) {
+                Msg.raw(sender, line);
+            }
+            return true;
+        }
+        List<DeployedInstance> instances = new ArrayList<>(plugin.getDeployments().all());
+        for (String line : DeploymentMap.render(instances, radius, playerPos)) {
             Msg.raw(sender, line);
         }
         return true;
@@ -791,7 +808,8 @@ public class DeployCommand implements TabExecutor {
         Msg.raw(sender, "<gold><bold>Déploiement des arènes");
         Msg.raw(sender, "<yellow>/deploy \"nom de l'arène\" <nombre> <gray>— déploie <nombre> instances : les existantes sont mises à jour sur place");
         Msg.raw(sender, "<yellow>/deploy list <gray>— lister les instances déployées");
-        Msg.raw(sender, "<yellow>/deploy map <gray>— carte des déploiements avec statistiques");
+        Msg.raw(sender, "<yellow>/deploy map <gray>— carte des déploiements (vue d'ensemble)");
+        Msg.raw(sender, "<yellow>/deploy map <instance> <gray>— zoom sur une instance (forme détaillée + coordonnées)");
         Msg.raw(sender, "<yellow>/deploy tp <instance> <gray>— téléporter au centre de l'instance");
         Msg.raw(sender, "<yellow>/deploy remove <instance ou arène> <gray>— efface la zone du monde et retire du registre (un nom d'arène supprime toutes ses instances)");
         Msg.raw(sender, "<yellow>/deploy rebuild <gray>— recrée le monde de production à neuf (void + spawn.schem + toutes les instances)");
@@ -805,7 +823,7 @@ public class DeployCommand implements TabExecutor {
             return filter(options, args[0]);
         }
         if (args.length == 2) {
-            if (args[0].equalsIgnoreCase("remove") || args[0].equalsIgnoreCase("tp")) {
+            if (args[0].equalsIgnoreCase("remove") || args[0].equalsIgnoreCase("tp") || args[0].equalsIgnoreCase("map")) {
                 List<String> options = new ArrayList<>(plugin.getDeployments().all().stream().map(DeployedInstance::getName).toList());
                 if (args[0].equalsIgnoreCase("remove")) {
                     options.addAll(plugin.getDeployments().all().stream().map(DeployedInstance::getArena).distinct().toList());

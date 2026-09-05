@@ -116,6 +116,7 @@ public final class Nbt {
 
     public static int typeOf(Object value) {
         if (value instanceof Byte) return BYTE;
+        if (value instanceof Boolean) return BYTE; // NBT n'a pas de booléen natif → Byte 0/1
         if (value instanceof Short) return SHORT;
         if (value instanceof Integer) return INT;
         if (value instanceof Long) return LONG;
@@ -141,7 +142,13 @@ public final class Nbt {
 
     private static void writePayload(DataOutputStream out, Object value) throws IOException {
         switch (typeOf(value)) {
-            case BYTE -> out.writeByte((Byte) value);
+            case BYTE -> {
+                if (value instanceof Boolean b) {
+                    out.writeByte(b ? (byte) 1 : (byte) 0);
+                } else {
+                    out.writeByte((Byte) value);
+                }
+            }
             case SHORT -> out.writeShort((Short) value);
             case INT -> out.writeInt((Integer) value);
             case LONG -> out.writeLong((Long) value);

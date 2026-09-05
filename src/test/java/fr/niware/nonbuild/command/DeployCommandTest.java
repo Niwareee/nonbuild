@@ -722,6 +722,9 @@ class DeployCommandTest {
 
         assertTrue(run("list"));
         assertTrue(run("map"));
+        // zoom sur une instance existante, et erreur propre sur une instance inconnue
+        assertTrue(run("map", "getdown-1"));
+        assertTrue(run("map", "inexistant"));
         assertTrue(run());
         assertTrue(run("help"));
         assertEquals(2, deployments.count());
@@ -747,6 +750,7 @@ class DeployCommandTest {
         assertTrue(removeOptions.contains("getdown-1"));
         assertTrue(removeOptions.contains("getdown"));
         assertTrue(command.onTabComplete(console, cmd, "deploy", new String[]{"tp", ""}).contains("getdown-1"));
+        assertTrue(command.onTabComplete(console, cmd, "deploy", new String[]{"map", ""}).contains("getdown-1"));
         assertTrue(command.onTabComplete(console, cmd, "deploy", new String[]{"list", ""}).isEmpty());
     }
 

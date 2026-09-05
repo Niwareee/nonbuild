@@ -58,6 +58,8 @@ public class BuildCommand implements TabExecutor {
             case "list" -> handleList(sender);
             case "tp" -> requirePlayer(sender, p -> handleTp(p, rest));
             case "delete" -> requirePlayer(sender, p -> handleDelete(p, rest));
+            case "rename" -> requirePlayer(sender, p -> handleRename(p, rest));
+            case "goal" -> requirePlayer(sender, this::handleGoal);
             case "help" -> {
                 sendHelp(sender);
                 yield true;
@@ -78,9 +80,21 @@ public class BuildCommand implements TabExecutor {
         return handler.apply(player);
     }
 
+    /**
+     * Vérifie qu'un nom d'arène est un slug valide (pas d'espaces, anglais uniquement).
+     * Accepte : a-zA-Z, 0-9, tirets, underscores.
+     */
+    private static boolean isValidArenaName(String name) {
+        return name.matches("^[a-zA-Z0-9_-]+$");
+    }
+
     private boolean handleAddArena(Player player, List<String> rest) {
         if (rest.isEmpty()) {
-            Msg.error(player, "Usage : /build addarena \"nom de l'arène\"");
+            Msg.error(player, "Usage : /build addarena <slug>");
+            return true;
+        }
+        if (rest.size() > 1) {
+            Msg.error(player, "Usage : /build addarena <slug> (pas d'espace dans le slug)");
             return true;
         }
         if (plugin.getSessions().has(player.getUniqueId())) {
@@ -93,14 +107,18 @@ public class BuildCommand implements TabExecutor {
             return true;
         }
 
-        String displayName = String.join(" ", rest);
+        String displayName = rest.get(0);
         if (displayName.length() > 64) {
             Msg.error(player, "Nom trop long (64 caractères max).");
             return true;
         }
+        if (!isValidArenaName(displayName)) {
+            Msg.error(player, "Nom invalide : utilisez uniquement des lettres anglaises, chiffres, tirets, underscores (pas d'espace).");
+            return true;
+        }
         String slug = ArenaStorage.slugify(displayName);
         if (slug.isEmpty()) {
-            Msg.error(player, "Nom invalide : utilisez des lettres, chiffres, espaces, tirets.");
+            Msg.error(player, "Nom invalide : utilisez uniquement des lettres anglaises, chiffres, tirets, underscores (pas d'espace).");
             return true;
         }
         if (plugin.getArenas().exists(slug)) {
@@ -457,6 +475,62 @@ public class BuildCommand implements TabExecutor {
         return true;
     }
 
+    private boolean handleRename(Player player, List<String> rest) {
+        if (rest.isEmpty()) {
+            Msg.error(player, "Usage : /build rename <arène> <nouveau-slug>");
+            return true;
+        }
+        String oldSlug = ArenaStorage.slugify(rest.get(0));
+        if (!plugin.getArenas().exists(oldSlug)) {
+            Msg.error(player, "Arène introuvable : " + oldSlug);
+            return true;
+        }
+        if (rest.size() < 2) {
+            Msg.error(player, "Usage : /build rename <arène> <nouveau-slug>");
+            return true;
+        }
+        if (rest.size() > 2) {
+            Msg.error(player, "Usage : /build rename <arène> <nouveau-slug> (pas d'espace dans le slug)");
+            return true;
+        }
+        String newDisplayName = rest.get(1);
+        if (newDisplayName.length() > 64) {
+            Msg.error(player, "Nom trop long (64 caractères max).");
+            return true;
+        }
+        if (!isValidArenaName(newDisplayName)) {
+            Msg.error(player, "Nom invalide : utilisez uniquement des lettres anglaises, chiffres, tirets, underscores (pas d'espace).");
+            return true;
+        }
+        String newSlug = ArenaStorage.slugify(newDisplayName);
+        if (newSlug.isEmpty()) {
+            Msg.error(player, "Nom invalide : utilisez uniquement des lettres anglaises, chiffres, tirets, underscores (pas d'espace).");
+            return true;
+        }
+        if (plugin.getArenas().exists(newSlug) && !newSlug.equals(oldSlug)) {
+            Msg.error(player, "L'arène <yellow>" + newSlug + "<red> existe déjà.");
+            return true;
+        }
+        Arena old = plugin.getArenas().get(oldSlug);
+        try {
+            plugin.getArenas().rename(oldSlug, newDisplayName);
+            int deployedUpdated = plugin.getDeployments().renameArena(oldSlug, newSlug);
+            Msg.ok(player, "Arène <yellow>" + oldSlug + "<green> renommée en <yellow>" + newSlug + " <gray>(" + newDisplayName + ")");
+            Msg.info(player, "Fichiers mis à jour : arenas/" + newSlug + ".yml + schematics/" + newSlug + ".schem");
+            if (deployedUpdated > 0) {
+                Msg.ok(player, deployedUpdated + " instance(s) déployée(s) mise(s) à jour (coordonnées conservées).");
+            }
+        } catch (IOException e) {
+            Msg.error(player, "Erreur lors du renommage : " + e.getMessage());
+        }
+        return true;
+    }
+
+    private boolean handleGoal(Player player) {
+        plugin.getGoalGUI().open(player);
+        return true;
+    }
+
     private void sendHelp(CommandSender sender) {
         Msg.raw(sender, "<gold><bold>Édition des arènes");
         Msg.raw(sender, "<yellow>/build addarena \"nom\" <gray>— ouvrir une session d'édition");
@@ -468,15 +542,17 @@ public class BuildCommand implements TabExecutor {
         Msg.raw(sender, "<yellow>/build edit <arène> <gray>— recharger une arène en édition");
         Msg.raw(sender, "<yellow>/build tp <arène> <gray>— téléporter au centre de l'arène (monde de build)");
         Msg.raw(sender, "<yellow>/build info <arène> <gray>| <yellow>/build list <gray>| <yellow>/build delete <arène>");
+        Msg.raw(sender, "<yellow>/build rename <arène> \"nouveau nom\" <gray>— renommer une arène (met à jour les instances)");
+        Msg.raw(sender, "<yellow>/build goal <gray>— état des maps par mode de jeu");
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 1) {
             return filter(List.of("addarena", "edit", "setcorner1", "setcorner2", "setspawn1",
-                    "setspawn2", "setcenter", "status", "save", "cancel", "info", "list", "tp", "delete", "help"), args[0]);
+                    "setspawn2", "setcenter", "status", "save", "cancel", "info", "list", "tp", "delete", "rename", "goal", "help"), args[0]);
         }
-        if (args.length == 2 && List.of("edit", "info", "tp", "delete").contains(args[0].toLowerCase(Locale.ROOT))) {
+        if (args.length == 2 && List.of("edit", "info", "tp", "delete", "rename").contains(args[0].toLowerCase(Locale.ROOT))) {
             return filter(plugin.getArenas().all().stream().map(Arena::getSlug).toList(), args[1]);
         }
         return List.of();

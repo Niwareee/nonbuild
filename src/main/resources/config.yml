@@ -4,9 +4,9 @@
 
 worlds:
   # Monde où les buildeurs construisent les arènes.
-  build: "build"
+  build: 'build'
   # Monde de production où les arènes sont déployées.
-  prod: "world.prod"
+  prod: 'world.prod'
 
 placement:
   # Demi-côté (blocs) de la zone carrée réservée autour du spawn (0,0).
@@ -31,3 +31,17 @@ edit:
   # Passe le joueur en mode creative à l'ouverture d'une session d'édition,
   # et restaure son mode précédent à la fin (save/cancel).
   set-creative: true
+
+game-modes:
+  PVPROLLS: 'PvPRolls'
+  GETDOWN: 'GetDown'
+  CLASSIC: 'Classic'
+  SHOOTBOW: 'ShootBow'
+  TNTRUN: 'TNTRun'
+  SKYWARS: 'Skywars'
+  JUMP: 'Jump'
+  MAZE: 'Labyrinthe'
+  BEDFIGHT: 'BedFight'
+  WALLSFIGHT: 'WallsFight'
+  FLOORISLAVA: 'FloorIsLava'
+  FFA: 'FFA'

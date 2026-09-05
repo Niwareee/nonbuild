@@ -10,6 +10,7 @@ import fr.niware.nonbuild.command.BuildCommand;
 import fr.niware.nonbuild.command.DeployCommand;
 import fr.niware.nonbuild.edit.SessionListener;
 import fr.niware.nonbuild.edit.SessionManager;
+import fr.niware.nonbuild.gui.GoalGUI;
 import fr.niware.nonbuild.storage.ArenaStorage;
 import fr.niware.nonbuild.storage.DeploymentStorage;
 import fr.niware.nonbuild.world.VoidChunkGenerator;
@@ -20,6 +21,7 @@ public class NonBuild extends JavaPlugin {
     private ArenaStorage arenaStorage;
     private DeploymentStorage deploymentStorage;
     private SessionManager sessionManager;
+    private GoalGUI goalGUI;
 
     @Override
     public void onEnable() {
@@ -31,6 +33,7 @@ public class NonBuild extends JavaPlugin {
         this.deploymentStorage = new DeploymentStorage(this);
         this.deploymentStorage.load();
         this.sessionManager = new SessionManager();
+        this.goalGUI = new GoalGUI(this);
 
         // Charger le monde de production au démarrage pour s'assurer qu'il est disponible
         loadProductionWorld();
@@ -104,5 +107,9 @@ public class NonBuild extends JavaPlugin {
 
     public SessionManager getSessions() {
         return sessionManager;
+    }
+
+    public GoalGUI getGoalGUI() {
+        return goalGUI;
     }
 }

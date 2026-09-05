@@ -1,16 +1,17 @@
 package fr.niware.nonbuild.storage;
 
-import fr.niware.nonbuild.model.Arena;
-import fr.niware.nonbuild.model.Point;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.plugin.java.JavaPlugin;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import fr.niware.nonbuild.model.Arena;
+import fr.niware.nonbuild.model.Point;
 
 public class ArenaStorage {
 
@@ -77,6 +78,66 @@ public class ArenaStorage {
             removed |= schem.delete();
         }
         return removed;
+    }
+
+    /**
+     * Renomme une arène : copie la schematic vers le nouveau slug,
+     * supprime les anciens fichiers, écrit le nouveau YAML.
+     * Retourne false si l'arène n'existe pas, le nouveau slug est invalide,
+     * ou une autre arène porte déjà ce slug.
+     */
+    public boolean rename(String oldSlug, String newDisplayName) throws IOException {
+        Arena old = arenas.get(oldSlug);
+        if (old == null) {
+            return false;
+        }
+        String newSlug = slugify(newDisplayName);
+        if (newSlug.isEmpty()) {
+            return false;
+        }
+        if (arenas.containsKey(newSlug) && !newSlug.equals(oldSlug)) {
+            return false;
+        }
+
+        boolean sameSlug = newSlug.equals(oldSlug);
+
+        // Copier la schematic vers le nouveau nom (avant de supprimer l'ancienne)
+        if (!sameSlug) {
+            File oldSchem = schematicFile(oldSlug);
+            File newSchem = schematicFile(newSlug);
+            if (oldSchem.exists()) {
+                java.nio.file.Files.copy(oldSchem.toPath(), newSchem.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+
+        // Supprimer les anciens fichiers (sauf si même slug)
+        arenas.remove(oldSlug);
+        if (!sameSlug) {
+            File yml = arenaFile(oldSlug);
+            if (yml.exists()) {
+                yml.delete();
+            }
+            File schem = schematicFile(oldSlug);
+            if (schem.exists()) {
+                schem.delete();
+            }
+        }
+
+        // Créer la nouvelle Arena avec le nouveau slug
+        Arena renamed = new Arena(newSlug);
+        renamed.setDisplayName(newDisplayName);
+        renamed.setWorld(old.getWorld());
+        renamed.setCorner1(old.getCorner1());
+        renamed.setCorner2(old.getCorner2());
+        renamed.setCenter(old.getCenter());
+        renamed.setSpawn1(old.getSpawn1());
+        renamed.setSpawn2(old.getSpawn2());
+        renamed.setSavedAt(System.currentTimeMillis());
+
+        // Écrire le nouveau YAML
+        save(renamed);
+        return true;
     }
 
     public Arena get(String slug) {
